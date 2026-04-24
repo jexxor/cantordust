@@ -13,8 +13,13 @@ Take a look at [this blogpost](https://inside.battelle.org/blog-details/battelle
 
 **Cantordust is dependent on Ghidra version 9.1 or higher**
 
+## Fork
 
-## Fork changes
+### Preview
+
+https://github.com/user-attachments/assets/6749ea27-79bb-4639-9eb7-fd2a3f9efd0a
+
+### Fork changes
 
 This fork currently includes the following behavior changes:
 
