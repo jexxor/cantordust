@@ -107,7 +107,9 @@ class BitMapSliderUI extends RangeSliderUI {
      * Code that actually makes the bitmap
      */
     private void makeBitmap(int low, int high) {
-        byte[] data = ((BitMapSlider) this.slider).data;
+        BitMapSlider bitMapSlider = (BitMapSlider) this.slider;
+        MainInterface mainInterface = bitMapSlider.cd != null ? bitMapSlider.cd.getMainInterface() : null;
+        byte[] data = bitMapSlider.data;
         if(data == null || data.length == 0) {
             return;
         }
@@ -128,7 +130,7 @@ class BitMapSliderUI extends RangeSliderUI {
         }
 
         // Calculate width and height
-        int width = 400;
+        int width = (mainInterface != null && mainInterface.isPlaybackActive()) ? 200 : 400;
         int height = (high-low)/width-1 > 0? (high-low)/width-1 : 1;
 
         // Create a new image
@@ -139,7 +141,7 @@ class BitMapSliderUI extends RangeSliderUI {
         for(int y=0; y < img.getHeight(); y++) {
             for(int x=0; x < img.getWidth(); x++) {
                 count = count+1 < data.length-1? count+1 : data.length-1;
-                img.setRGB(x, y, (new Color(0, data[count] & 0xff, 0)).getRGB());
+                img.setRGB(x, y, ((data[count] & 0xff) << 8));
             }
         }
 
@@ -293,10 +295,13 @@ class BitMapSliderUI extends RangeSliderUI {
             upperDragging = false;
             slider.setValueIsAdjusting(false);
             slider.setCursor(new Cursor(Cursor.HAND_CURSOR));
-            if(((BitMapSlider) slider) == ((BitMapSlider) slider).cd.getMainInterface().macroSlider) {
-                int low = ((BitMapSlider) slider).getValue()-1;
-                int high = ((BitMapSlider) slider).getUpperValue();
-                ((BitMapSliderUI) ((BitMapSlider) slider).cd.getMainInterface().microSlider.getUI()).makeBitmapAsync(low, high);
+            BitMapSlider currentSlider = (BitMapSlider) slider;
+            MainInterface mainInterface = currentSlider.cd != null ? currentSlider.cd.getMainInterface() : null;
+            if(mainInterface != null && currentSlider == mainInterface.macroSlider && mainInterface.microSlider != null
+                    && mainInterface.microSlider.getUI() instanceof BitMapSliderUI) {
+                int low = currentSlider.getValue()-1;
+                int high = currentSlider.getUpperValue();
+                ((BitMapSliderUI) mainInterface.microSlider.getUI()).makeBitmapAsync(low, high);
             }
 
             super.mouseReleased(e);

@@ -2,7 +2,6 @@ package resources;
 
 import java.awt.Color;
 import java.awt.Graphics;
-import java.awt.Graphics2D;
 import java.awt.Image;
 import java.awt.Rectangle;
 import java.awt.event.ActionEvent;
@@ -11,7 +10,6 @@ import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
-import java.awt.geom.Rectangle2D;
 import java.awt.image.BufferedImage;
 
 import javax.swing.JButton;
@@ -261,107 +259,93 @@ public class BitMapVisualizer extends Visualizer {
         }
         int windowWidth = Math.max(1, (int) window.getWidth());
         int windowHeight = Math.max(1, (int) window.getHeight());
-
-        byte[] data_offset = new byte[data.length];
-        int nonOffsetLength = Math.max(0, data.length - offset);
-        for(i = 0; i < nonOffsetLength; i++) {
-            data_offset[i] = data[i + offset];
-        }
-        for(i = nonOffsetLength; i < data.length; i++) {
-            data_offset[i] = 0;
-        }
-
-        Graphics2D g;
         BufferedImage bimg;
 
         switch(mode) {
             //32bpp ARGB
             case 1:
                 bimg = new BufferedImage(width, Math.max(1, (high - low) / xMax / 4 + 1), BufferedImage.TYPE_INT_ARGB);
-                g = bimg.createGraphics();
                 for(i = low; i < high - 4; i += 4) {
-                    int pixel = ((data_offset[i + 3] << 24) + (data_offset[i + 2] << 16) + (data_offset[i + 1] << 8) + data_offset[i]) & 0xFFFFFFFF;
-                    g.setColor(new Color(pixel, true));
-                    g.fill(new Rectangle2D.Double(x, y, 1, 1));
+                    int b0 = byteAtOffset(data, i, offset);
+                    int b1 = byteAtOffset(data, i + 1, offset);
+                    int b2 = byteAtOffset(data, i + 2, offset);
+                    int b3 = byteAtOffset(data, i + 3, offset);
+                    int pixel = (b3 << 24) | (b2 << 16) | (b1 << 8) | b0;
+                    bimg.setRGB(x, y, pixel);
                     x++;
                     if(x == xMax) {
                         y++;
                         x = 0;
                     }
                 }
-                g.dispose();
                 break;
 
             //24bpp RGB
             case 2:
                 bimg = new BufferedImage(width, Math.max(1, (high - low) / xMax / 3 + 1), BufferedImage.TYPE_INT_ARGB);
-                g = bimg.createGraphics();
                 for(i = low; i < high - 3; i += 3) {
-                    int pixel = ((data_offset[i + 2] << 16) + (data_offset[i + 1] << 8) + data_offset[i]) & 0xFFFFFFFF;
-                    g.setColor(new Color(pixel));
-                    g.fill(new Rectangle2D.Double(x, y, 1, 1));
+                    int b0 = byteAtOffset(data, i, offset);
+                    int b1 = byteAtOffset(data, i + 1, offset);
+                    int b2 = byteAtOffset(data, i + 2, offset);
+                    int pixel = (0xFF << 24) | (b2 << 16) | (b1 << 8) | b0;
+                    bimg.setRGB(x, y, pixel);
                     x++;
                     if(x == xMax) {
                         y++;
                         x = 0;
                     }
                 }
-                g.dispose();
                 break;
 
             //16bpp ARGB1555 color is too saturated
             case 3:
                 bimg = new BufferedImage(width, Math.max(1, (high - low) / xMax / 2 + 1), BufferedImage.TYPE_INT_ARGB);
-                g = bimg.createGraphics();
                 for(i = low; i < high - 2; i += 2) {
-                    int alpha = (data_offset[i + 1] & 0x80) >> 7;
-                    float red = ((data_offset[i + 1] & 0x7C) >> 2) / (0x1F);
-                    float green = (((data_offset[i + 1] & 0x03) << 3) + ((data[i] & 0xE0) >> 5)) / (0x1F);
-                    float blue = (data_offset[i] & 0x1F) / (0x1F);
-                    g.setColor(new Color(red, green, blue, alpha));
-                    g.fill(new Rectangle2D.Double(x, y, 1, 1));
+                    int lowByte = byteAtOffset(data, i, offset);
+                    int highByte = byteAtOffset(data, i + 1, offset);
+                    int alpha = ((highByte & 0x80) != 0) ? 0xFF : 0x00;
+                    int red = (int)((((highByte & 0x7C) >> 2) / 31.0f) * 255.0f);
+                    int green = (int)(((((highByte & 0x03) << 3) + ((lowByte & 0xE0) >> 5)) / 31.0f) * 255.0f);
+                    int blue = (int)(((lowByte & 0x1F) / 31.0f) * 255.0f);
+                    int pixel = (alpha << 24) | (red << 16) | (green << 8) | blue;
+                    bimg.setRGB(x, y, pixel);
                     x++;
                     if(x == xMax) {
                         y++;
                         x = 0;
                     }
                 }
-                g.dispose();
                 break;
 
             // entropy
             case 4:
                 bimg = new BufferedImage(width, Math.max(1, (high - low) / xMax + 1), BufferedImage.TYPE_INT_ARGB);
-                g = bimg.createGraphics();
                 ColorEntropy entropy = new ColorEntropy(cantordust, data);
                 for(i = low; i < high; i++) {
                     Rgb rgb = entropy.getPoint(i);
-                    g.setColor(new Color(rgb.r, rgb.g, rgb.b));
-                    g.fill(new Rectangle2D.Double(x, y, 1, 1));
+                    int pixel = (0xFF << 24) | (rgb.r << 16) | (rgb.g << 8) | rgb.b;
+                    bimg.setRGB(x, y, pixel);
                     x++;
                     if(x == xMax) {
                         y++;
                         x = 0;
                     }
                 }
-                g.dispose();
                 break;
 
             // 8bpp
             default:
                 bimg = new BufferedImage(width, Math.max(1, (high - low) / xMax + 1), BufferedImage.TYPE_INT_ARGB);
-                g = bimg.createGraphics();
                 for(i = low; i < high; i++) {
-                    int unsignedByte = data_offset[i] & 0xFF;
-                    g.setColor(new Color(0, unsignedByte, 0));
-                    g.fill(new Rectangle2D.Double(x, y, 1, 1));
+                    int unsignedByte = byteAtOffset(data, i, offset);
+                    int pixel = (0xFF << 24) | (unsignedByte << 8);
+                    bimg.setRGB(x, y, pixel);
                     x++;
                     if(x == xMax) {
                         y++;
                         x = 0;
                     }
                 }
-                g.dispose();
         }
 
         int scaleMode = mainInterface.isPlaybackActive() ? Image.SCALE_FAST : Image.SCALE_SMOOTH;
@@ -370,6 +354,14 @@ public class BitMapVisualizer extends Visualizer {
             img = scaledImage;
             repaint();
         });
+    }
+
+    private int byteAtOffset(byte[] data, int index, int offset) {
+        int sourceIndex = index + offset;
+        if(sourceIndex < 0 || sourceIndex >= data.length) {
+            return 0;
+        }
+        return data[sourceIndex] & 0xFF;
     }
     
     public static int getWindowSize() {

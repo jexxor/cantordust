@@ -8,7 +8,6 @@ import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
-import java.awt.geom.Rectangle2D;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -174,15 +173,27 @@ public class TwoTupleVisualizer extends Visualizer {
         cycles += 1;
         boolean interactiveScrub = dataRangeSlider != null && dataRangeSlider.getValueIsAdjusting();
         if(mainInterface.isPlaybackActive() || interactiveScrub) {
+            byte[] data = cantordust.getMainInterface().getData();
             int range = Math.max(1, high - low);
-            int stride = Math.max(1, range / 131072);
-            HashMap<TwoByteTuple, Integer> playbackFreqs = countedByteFrequencies(low, high, stride);
-            for(TwoByteTuple twoTuple: playbackFreqs.keySet()) {
-                int freq = playbackFreqs.get(twoTuple);
+            int stride = Math.max(1, range / 65536);
+            int[] playbackFreqs = new int[256 * 256];
+            int start = Math.max(0, low);
+            int end = Math.min(high, data.length - 1);
+            for(int tupleIdx = start; tupleIdx < end; tupleIdx += stride) {
+                int first = data[tupleIdx] & 0xFF;
+                int second = data[tupleIdx + 1] & 0xFF;
+                int tupleIndex = (first << 8) | second;
+                playbackFreqs[tupleIndex] = playbackFreqs[tupleIndex] + 1;
+            }
+            for(int tupleIndex = 0; tupleIndex < playbackFreqs.length; tupleIndex++) {
+                int freq = playbackFreqs[tupleIndex];
+                if(freq == 0) {
+                    continue;
+                }
                 g.setColor(getColor(freq, colorMode));
-                int x = twoTuple.x & 0xff;
-                int y = twoTuple.y & 0xff;
-                g.fill(new Rectangle2D.Double(y, x, 1, 1));
+                int x = (tupleIndex >> 8) & 0xFF;
+                int y = tupleIndex & 0xFF;
+                g.fillRect(y, x, 1, 1);
             }
             g.dispose();
             return;
@@ -226,8 +237,7 @@ public class TwoTupleVisualizer extends Visualizer {
             //g.setColor(new Color(colorVal, colorVal, colorVal));
             int x = twoTuple.x & 0xff;
             int y = twoTuple.y & 0xff;
-            // g.fill(new Rectangle2D.Double(x*blockWidth, y*blockWidth, blockWidth, blockWidth));
-            g.fill(new Rectangle2D.Double(y, x, 1, 1));
+            g.fillRect(y, x, 1, 1);
 
         }
         g.dispose();

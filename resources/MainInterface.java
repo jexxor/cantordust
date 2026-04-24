@@ -21,7 +21,8 @@ import java.util.Arrays;
 import java.util.HashMap;
 
 public class MainInterface extends JPanel {
-    private static final int DATA_WINDOW_UPDATE_THROTTLE_MS = 33;
+    private static final int DATA_WINDOW_UPDATE_THROTTLE_MS = 16;
+    private static final int DATA_WINDOW_BUFFER_POOL_SIZE = 4;
     private byte[] data;
     private byte[] fullData;
     private static final int DATA_WINDOW_SIZE = 1048575;
@@ -89,6 +90,8 @@ public class MainInterface extends JPanel {
     private int pendingDataWindowStart = 0;
     private long pendingDataWindowRequestId = 0L;
     private boolean suppressDataSliderCallback = false;
+    private final byte[][] dataWindowBufferPool = new byte[DATA_WINDOW_BUFFER_POOL_SIZE][];
+    private int dataWindowBufferCursor = 0;
 
     public MainInterface(byte[] mdata, GhidraSrc cd, JFrame frame) throws IOException {
         this.data = mdata;
@@ -732,6 +735,30 @@ public class MainInterface extends JPanel {
         return Math.max(0, Math.min(requestedStart, maxStart));
     }
 
+    private int getDataWindowUpdateThrottleMs() {
+        if(isPlaybackActive()) {
+            return DATA_WINDOW_UPDATE_THROTTLE_MS;
+        }
+        if(dataSlider != null && dataSlider.getValueIsAdjusting()) {
+            return DATA_WINDOW_UPDATE_THROTTLE_MS;
+        }
+        return 0;
+    }
+
+    private byte[] copyDataWindowIntoBuffer(int start, int length) {
+        if(length <= 0) {
+            return new byte[0];
+        }
+        byte[] buffer = dataWindowBufferPool[dataWindowBufferCursor];
+        if(buffer == null || buffer.length != length) {
+            buffer = new byte[length];
+            dataWindowBufferPool[dataWindowBufferCursor] = buffer;
+        }
+        System.arraycopy(fullData, start, buffer, 0, length);
+        dataWindowBufferCursor = (dataWindowBufferCursor + 1) % DATA_WINDOW_BUFFER_POOL_SIZE;
+        return buffer;
+    }
+
     private void requestDataWindowUpdate(int requestedStart) {
         if(dataSlider == null) {
             return;
@@ -755,7 +782,8 @@ public class MainInterface extends JPanel {
         long lastApplyStartMs = 0L;
         while(true) {
             long now = System.currentTimeMillis();
-            long waitMs = DATA_WINDOW_UPDATE_THROTTLE_MS - (now - lastApplyStartMs);
+            int throttleMs = getDataWindowUpdateThrottleMs();
+            long waitMs = throttleMs - (now - lastApplyStartMs);
             if(waitMs > 0L) {
                 try {
                     Thread.sleep(waitMs);
@@ -779,7 +807,7 @@ public class MainInterface extends JPanel {
             int start = clampDataWindowStart(requestedStart);
             int windowSize = Math.min(DATA_WINDOW_SIZE, fullData.length);
             int end = Math.min(fullData.length, start + windowSize);
-            byte[] windowData = Arrays.copyOfRange(fullData, start, end);
+            byte[] windowData = copyDataWindowIntoBuffer(start, end - start);
 
             final int applyStart = start;
             final byte[] applyData = windowData;

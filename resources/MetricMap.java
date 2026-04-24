@@ -21,6 +21,10 @@ public class MetricMap extends Visualizer{
     private volatile int memLocBaseOffset = 0;
     private volatile Scurve renderLookupMap;
     private volatile BufferedImage renderedImage;
+    private Scurve playbackHilbertMap;
+    private Scurve playbackZorderMap;
+    private Scurve playbackHcurveMap;
+    private Linear playbackLinearMap;
     protected Popup popupAddr;
     protected JPopupMenu popupMenu;
     protected Scurve map;
@@ -266,23 +270,34 @@ public class MetricMap extends Visualizer{
         double playbackSize = Math.pow(PLAYBACK_RENDER_SIZE, 2);
         try {
             if(activeMap.isType("hilbert")) {
-                return new Hilbert(cantordust, 2, playbackSize);
+                if(playbackHilbertMap == null) {
+                    playbackHilbertMap = new Hilbert(cantordust, 2, playbackSize);
+                }
+                return playbackHilbertMap;
             }
             if(activeMap.isType("zorder")) {
-                return new Zorder(cantordust, 2, playbackSize);
+                if(playbackZorderMap == null) {
+                    playbackZorderMap = new Zorder(cantordust, 2, playbackSize);
+                }
+                return playbackZorderMap;
             }
             if(activeMap.isType("hcurve")) {
-                return new HCurve(cantordust, 2, playbackSize);
+                if(playbackHcurveMap == null) {
+                    playbackHcurveMap = new HCurve(cantordust, 2, playbackSize);
+                }
+                return playbackHcurveMap;
             }
             if(activeMap.isType("linear")) {
-                Linear playbackLinear = new Linear(cantordust, 2, playbackSize);
+                if(playbackLinearMap == null) {
+                    playbackLinearMap = new Linear(cantordust, 2, playbackSize);
+                }
                 int sourceWidth = Math.max(1, activeMap.getWidth());
                 int sourceHeight = Math.max(1, activeMap.getHeight());
                 int reference = Math.max(sourceWidth, sourceHeight);
                 double scale = (double)PLAYBACK_RENDER_SIZE / (double)Math.max(1, reference);
-                playbackLinear.setWidth(Math.max(1, (int)Math.round(sourceWidth * scale)));
-                playbackLinear.setHeight(Math.max(1, (int)Math.round(sourceHeight * scale)));
-                return playbackLinear;
+                playbackLinearMap.setWidth(Math.max(1, (int)Math.round(sourceWidth * scale)));
+                playbackLinearMap.setHeight(Math.max(1, (int)Math.round(sourceHeight * scale)));
+                return playbackLinearMap;
             }
         } catch(RuntimeException ignored) {
             return activeMap;
