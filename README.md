@@ -13,9 +13,10 @@ Take a look at [this blogpost](https://inside.battelle.org/blog-details/battelle
 
 **Cantordust is dependent on Ghidra version 9.1 or higher**
 
-![Visualization](./preview/demo.mp4)
 
 ## Fork changes
+
+<video src="./preview/demo.mp4" controls muted loop playsinline width="100%"></video>
 
 This fork currently includes the following behavior changes:
 
