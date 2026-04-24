@@ -65,9 +65,12 @@ public class ClassifierModel {
 
     public int classAtIndex(int index) {
         cantordust.cdprint(String.format("calling classAtIndex for index: %d and getting block %d\n", index, index / BLOCK_SIZE));
+        if(blockClassifications == null || blockClassifications.length == 0) {
+            return 0;
+        }
         try {
             return blockClassifications[index / BLOCK_SIZE];
-        } catch(IndexOutOfBoundsException e) {
+        } catch(RuntimeException e) {
             // Temporary. classifyData should account for last section of data. Will have to fix that.
             return 0;
         }

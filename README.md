@@ -49,6 +49,9 @@ This fork currently includes the following behavior changes:
 - Two Tuple view now shows a click popup with tuple coordinates in `(0xXX, 0xYY)` format.
 - Fixed fast-scroll stability issues that could throw exceptions and spike CPU usage by hardening slider bitmap rendering, Two Tuple cache bounds handling, and serializing Metric Map redraws to prevent concurrent `HashMap` corruption (`Node`/`TreeNode` class cast crash).
 - Fixed upper-thumb interaction in the relative (micro) range slider so it can be dragged reliably.
+- Added smooth data-window playback controls (`Play`, `Pause`, `Stop`, `Loop`, `Step`, and interval `ms`) for large files, with animation driving the large vertical data slider.
+- Data-window updates now use a latest-wins queue, and bitmap/two-tuple renderers now coalesce background work so rapid playback drops stale frames instead of spawning unbounded render threads.
+- Current playback scope is the large-file data window slider only; macro/micro auto-animation is intentionally left for a future iteration.
 
 ## Development Tips:
 

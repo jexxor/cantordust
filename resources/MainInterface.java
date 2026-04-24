@@ -16,6 +16,7 @@ import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Image;
 import java.awt.Insets;
+import java.lang.reflect.InvocationTargetException;
 import java.util.Arrays;
 import java.util.HashMap;
 
@@ -40,6 +41,9 @@ public class MainInterface extends JPanel {
     public JButton byteCloudButton;
     public JButton metricMapButton;
     public JButton oneTupleButton;
+    public JButton playbackPlayButton;
+    public JButton playbackPauseButton;
+    public JButton playbackStopButton;
     public JPopupMenu popup;
 
     public GhidraSrc cantordust;
@@ -51,6 +55,14 @@ public class MainInterface extends JPanel {
     public JLabel widthValue = new JLabel();
     public JLabel offsetValue = new JLabel();
     public JLabel programName = new JLabel();
+    public JLabel playbackTargetLabel = new JLabel();
+    public JLabel playbackStepLabel = new JLabel();
+    public JLabel playbackIntervalLabel = new JLabel();
+    public JCheckBox playbackLoopCheckBox;
+    public JComboBox<String> playbackTargetCombo;
+    public JSpinner playbackStepSpinner;
+    public JSpinner playbackIntervalSpinner;
+    public JPanel playbackPanel;
 
     public JPanel currVis = new JPanel();
 
@@ -70,6 +82,12 @@ public class MainInterface extends JPanel {
     public int xOffset = 0;
     protected byte theme;
     protected Boolean dispMetricMap;
+    private DataPlaybackController dataPlaybackController;
+    private final Object dataWindowUpdateLock = new Object();
+    private boolean dataWindowUpdateInProgress = false;
+    private int pendingDataWindowStart = 0;
+    private long pendingDataWindowRequestId = 0L;
+    private boolean suppressDataSliderCallback = false;
 
     public MainInterface(byte[] mdata, GhidraSrc cd, JFrame frame) throws IOException {
         this.data = mdata;
@@ -153,6 +171,8 @@ public class MainInterface extends JPanel {
         widthSlider.setMaximum(1024);
         widthSlider.setOrientation(SwingConstants.HORIZONTAL);
         widthSlider.setPreferredSize(slideDim);
+        widthSlider.setMinimumSize(slideDim);
+        widthSlider.setMaximumSize(slideDim);
         gbc.gridy = 512;
         gbc.gridx = xOffset + 21;
         gbc.gridheight = 1;
@@ -181,6 +201,8 @@ public class MainInterface extends JPanel {
         offsetSlider.setMaximum(255);
         offsetSlider.setOrientation(SwingConstants.HORIZONTAL);
         offsetSlider.setPreferredSize(slideDim);
+        offsetSlider.setMinimumSize(slideDim);
+        offsetSlider.setMaximumSize(slideDim);
         gbc.gridx = xOffset + 270;
         add(offsetSlider, gbc);
 
@@ -191,6 +213,57 @@ public class MainInterface extends JPanel {
         offsetUpButton.setBorder(BorderFactory.createEmptyBorder());
         gbc.gridx = xOffset + 512;
         add(offsetUpButton, gbc);
+
+        addPlaybackControls(gbc);
+        dataPlaybackController = new DataPlaybackController(this);
+        playbackPlayButton.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                dataPlaybackController.play();
+            }
+        });
+        playbackPauseButton.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                dataPlaybackController.pause();
+            }
+        });
+        playbackStopButton.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                dataPlaybackController.stop();
+            }
+        });
+        playbackLoopCheckBox.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                dataPlaybackController.setLoopEnabled(playbackLoopCheckBox.isSelected());
+            }
+        });
+        playbackTargetCombo.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                dataPlaybackController.setTarget(DataPlaybackController.PlaybackTarget.fromLabel((String) playbackTargetCombo.getSelectedItem()));
+            }
+        });
+        playbackStepSpinner.addChangeListener(new ChangeListener() {
+            @Override
+            public void stateChanged(ChangeEvent e) {
+                Number value = (Number) playbackStepSpinner.getValue();
+                dataPlaybackController.setStepUnits(value.intValue());
+            }
+        });
+        playbackIntervalSpinner.addChangeListener(new ChangeListener() {
+            @Override
+            public void stateChanged(ChangeEvent e) {
+                Number value = (Number) playbackIntervalSpinner.getValue();
+                dataPlaybackController.setIntervalMs(value.intValue());
+            }
+        });
+        dataPlaybackController.setLoopEnabled(playbackLoopCheckBox.isSelected());
+        dataPlaybackController.setTarget(DataPlaybackController.PlaybackTarget.fromLabel((String) playbackTargetCombo.getSelectedItem()));
+        dataPlaybackController.setStepUnits(((Number) playbackStepSpinner.getValue()).intValue());
+        dataPlaybackController.setIntervalMs(((Number) playbackIntervalSpinner.getValue()).intValue());
         
         // Default Current Visualization: MetricMap
         currVis = new MetricMap(MetricMap.getWindowSize(), cantordust, this, frame, true);
@@ -300,7 +373,7 @@ public class MainInterface extends JPanel {
             dataSlider.addChangeListener(new ChangeListener() {
                 public void stateChanged(ChangeEvent e) {
                     JSlider slider = (JSlider)e.getSource();
-                    if(!slider.getValueIsAdjusting()){
+                    if(!suppressDataSliderCallback && !slider.getValueIsAdjusting()){
                         updateDataWindow(slider.getValue());
                     }
                 }
@@ -407,6 +480,79 @@ public class MainInterface extends JPanel {
         darkTheme();
     }
 
+    private void addPlaybackControls(GridBagConstraints gbc) {
+        Insets originalInsets = gbc.insets;
+        int originalGridWidth = gbc.gridwidth;
+        int originalGridHeight = gbc.gridheight;
+        int originalGridX = gbc.gridx;
+        int originalGridY = gbc.gridy;
+        int originalFill = gbc.fill;
+        int originalAnchor = gbc.anchor;
+
+        playbackPanel = new JPanel();
+        playbackPanel.setLayout(new BoxLayout(playbackPanel, BoxLayout.Y_AXIS));
+        playbackPanel.setOpaque(false);
+
+        JPanel topRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 4, 0));
+        topRow.setOpaque(false);
+
+        JPanel bottomRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 4, 0));
+        bottomRow.setOpaque(false);
+
+        playbackPlayButton = new JButton("Play");
+        playbackPauseButton = new JButton("Pause");
+        playbackStopButton = new JButton("Stop");
+        playbackLoopCheckBox = new JCheckBox("Loop");
+        playbackTargetCombo = new JComboBox<String>();
+        if(dataSlider != null) {
+            playbackTargetCombo.addItem(DataPlaybackController.PlaybackTarget.ABSOLUTE_WINDOW.getLabel());
+        }
+        playbackTargetCombo.addItem(DataPlaybackController.PlaybackTarget.MACRO_RANGE.getLabel());
+        playbackTargetCombo.addItem(DataPlaybackController.PlaybackTarget.MICRO_RANGE.getLabel());
+
+        playbackTargetLabel.setText("Slider");
+        playbackStepSpinner = new JSpinner(new SpinnerNumberModel(64, 1, DATA_WINDOW_SIZE, 1));
+        playbackIntervalSpinner = new JSpinner(new SpinnerNumberModel(40, 10, 1000, 5));
+        playbackStepLabel.setText("Step");
+        playbackIntervalLabel.setText("ms");
+
+        playbackTargetCombo.setPreferredSize(new Dimension(95, 22));
+        playbackStepSpinner.setPreferredSize(new Dimension(70, 22));
+        playbackIntervalSpinner.setPreferredSize(new Dimension(60, 22));
+
+        topRow.add(playbackPlayButton);
+        topRow.add(playbackPauseButton);
+        topRow.add(playbackStopButton);
+        topRow.add(playbackLoopCheckBox);
+
+        bottomRow.add(playbackTargetLabel);
+        bottomRow.add(playbackTargetCombo);
+        bottomRow.add(playbackStepLabel);
+        bottomRow.add(playbackStepSpinner);
+        bottomRow.add(playbackIntervalLabel);
+        bottomRow.add(playbackIntervalSpinner);
+
+        playbackPanel.add(topRow);
+        playbackPanel.add(bottomRow);
+
+        gbc.gridheight = 1;
+        gbc.gridwidth = 120;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.anchor = GridBagConstraints.WEST;
+        gbc.gridy = 513;
+        gbc.insets = new Insets(2, 2, 2, 2);
+        gbc.gridx = xOffset + 20;
+        add(playbackPanel, gbc);
+
+        gbc.gridx = originalGridX;
+        gbc.gridy = originalGridY;
+        gbc.gridwidth = originalGridWidth;
+        gbc.gridheight = originalGridHeight;
+        gbc.fill = originalFill;
+        gbc.anchor = originalAnchor;
+        gbc.insets = originalInsets;
+    }
+
     /*public changeDemo() {
         JButton decLowerButton = new JButton("decrease lower bound");
         JButton incLowerButton = new JButton("increase lower bound");
@@ -431,12 +577,222 @@ public class MainInterface extends JPanel {
     }
 
     private void updateDataWindow(int requestedStart) {
+        requestDataWindowUpdate(requestedStart);
+    }
+
+    public void applyDataWindowFromPlayback(int requestedStart) {
+        if(dataSlider == null) {
+            return;
+        }
+
+        int clampedStart = clampDataWindowStart(requestedStart);
+        if(dataSlider.getValue() != clampedStart) {
+            suppressDataSliderCallback = true;
+            try {
+                dataSlider.setValue(clampedStart);
+            } finally {
+                suppressDataSliderCallback = false;
+            }
+        }
+        requestDataWindowUpdate(clampedStart);
+    }
+
+    public boolean isPlaybackActive() {
+        return dataPlaybackController != null && dataPlaybackController.isPlaying();
+    }
+
+    public boolean isPlaybackTargetAvailable(DataPlaybackController.PlaybackTarget target) {
+        switch(target) {
+            case ABSOLUTE_WINDOW:
+                return dataSlider != null;
+            case MACRO_RANGE:
+                return macroSlider != null;
+            case MICRO_RANGE:
+                return microSlider != null;
+            default:
+                return false;
+        }
+    }
+
+    public JSlider getPlaybackSwingSlider(DataPlaybackController.PlaybackTarget target) {
+        switch(target) {
+            case ABSOLUTE_WINDOW:
+                return dataSlider;
+            case MACRO_RANGE:
+                return macroSlider;
+            case MICRO_RANGE:
+                return microSlider;
+            default:
+                return null;
+        }
+    }
+
+    public int getPlaybackTargetCurrent(DataPlaybackController.PlaybackTarget target) {
+        switch(target) {
+            case ABSOLUTE_WINDOW:
+                return getDataWindowStart();
+            case MACRO_RANGE:
+                return macroSlider.getValue();
+            case MICRO_RANGE:
+                return microSlider.getValue();
+            default:
+                return 0;
+        }
+    }
+
+    public int getPlaybackTargetMinimum(DataPlaybackController.PlaybackTarget target) {
+        switch(target) {
+            case ABSOLUTE_WINDOW:
+                return getDataWindowMinimum();
+            case MACRO_RANGE:
+                return macroSlider.getMinimum();
+            case MICRO_RANGE:
+                return microSlider.getMinimum();
+            default:
+                return 0;
+        }
+    }
+
+    public int getPlaybackTargetMaximum(DataPlaybackController.PlaybackTarget target) {
+        switch(target) {
+            case ABSOLUTE_WINDOW:
+                return getDataWindowMaximum();
+            case MACRO_RANGE:
+                return getRangePlaybackMaxStart(macroSlider);
+            case MICRO_RANGE:
+                return getRangePlaybackMaxStart(microSlider);
+            default:
+                return 0;
+        }
+    }
+
+    public void applyPlaybackTarget(DataPlaybackController.PlaybackTarget target, int requestedStart) {
+        switch(target) {
+            case ABSOLUTE_WINDOW:
+                applyDataWindowFromPlayback(requestedStart);
+                break;
+            case MACRO_RANGE:
+                applyRangeWindowFromPlayback(macroSlider, requestedStart);
+                break;
+            case MICRO_RANGE:
+                applyRangeWindowFromPlayback(microSlider, requestedStart);
+                break;
+            default:
+                break;
+        }
+    }
+
+    public int getDataWindowStart() {
+        if(dataSlider == null) {
+            return 0;
+        }
+        return dataSlider.getValue();
+    }
+
+    public int getDataWindowMinimum() {
+        if(dataSlider == null) {
+            return 0;
+        }
+        return dataSlider.getMinimum();
+    }
+
+    public int getDataWindowMaximum() {
+        if(dataSlider == null) {
+            return 0;
+        }
+        return dataSlider.getMaximum();
+    }
+
+    private int getRangePlaybackMaxStart(BitMapSlider slider) {
+        int maxStart = slider.getMaximum() - slider.getExtent();
+        return Math.max(slider.getMinimum(), maxStart);
+    }
+
+    private void applyRangeWindowFromPlayback(BitMapSlider slider, int requestedStart) {
+        int min = slider.getMinimum();
+        int maxStart = getRangePlaybackMaxStart(slider);
+        int start = Math.max(min, Math.min(requestedStart, maxStart));
+        if(slider.getValue() == start) {
+            return;
+        }
+
+        slider.getModel().setRangeProperties(start, slider.getExtent(), slider.getMinimum(), slider.getMaximum(), false);
+    }
+
+    private int clampDataWindowStart(int requestedStart) {
         int windowSize = Math.min(DATA_WINDOW_SIZE, fullData.length);
         int maxStart = Math.max(0, fullData.length - windowSize);
-        int start = Math.max(0, Math.min(requestedStart, maxStart));
-        int end = Math.min(fullData.length, start + windowSize);
+        return Math.max(0, Math.min(requestedStart, maxStart));
+    }
 
-        data = Arrays.copyOfRange(fullData, start, end);
+    private void requestDataWindowUpdate(int requestedStart) {
+        if(dataSlider == null) {
+            return;
+        }
+
+        synchronized(dataWindowUpdateLock) {
+            pendingDataWindowStart = requestedStart;
+            pendingDataWindowRequestId++;
+            if(dataWindowUpdateInProgress) {
+                return;
+            }
+            dataWindowUpdateInProgress = true;
+        }
+
+        Thread worker = new Thread(() -> drainPendingDataWindowUpdates(), "cantordust-data-window");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    private void drainPendingDataWindowUpdates() {
+        while(true) {
+            int requestedStart;
+            long requestId;
+            synchronized(dataWindowUpdateLock) {
+                requestedStart = pendingDataWindowStart;
+                requestId = pendingDataWindowRequestId;
+            }
+
+            int start = clampDataWindowStart(requestedStart);
+            int windowSize = Math.min(DATA_WINDOW_SIZE, fullData.length);
+            int end = Math.min(fullData.length, start + windowSize);
+            byte[] windowData = Arrays.copyOfRange(fullData, start, end);
+
+            synchronized(dataWindowUpdateLock) {
+                if(requestId != pendingDataWindowRequestId) {
+                    continue;
+                }
+            }
+
+            final int applyStart = start;
+            final byte[] applyData = windowData;
+            try {
+                SwingUtilities.invokeAndWait(() -> applyDataWindow(applyStart, applyData));
+            } catch (InterruptedException interruptedException) {
+                Thread.currentThread().interrupt();
+                synchronized(dataWindowUpdateLock) {
+                    dataWindowUpdateInProgress = false;
+                }
+                return;
+            } catch (InvocationTargetException invocationTargetException) {
+                cantordust.cdprint("data window update failed\n");
+                synchronized(dataWindowUpdateLock) {
+                    dataWindowUpdateInProgress = false;
+                }
+                return;
+            }
+
+            synchronized(dataWindowUpdateLock) {
+                if(requestId == pendingDataWindowRequestId) {
+                    dataWindowUpdateInProgress = false;
+                    return;
+                }
+            }
+        }
+    }
+
+    private void applyDataWindow(int start, byte[] nextDataWindow) {
+        data = nextDataWindow;
 
         long minGhidraAddress = Long.parseLong(cantordust.getCurrentProgram().getMinAddress().toString(false), 16);
         long maxAddress = minGhidraAddress + start + microSlider.getUpperValue();
@@ -528,6 +884,42 @@ public class MainInterface extends JPanel {
 
         this.themeButton.setBackground(buttonColor);
         this.themeButton.setForeground(textColor);
+
+        if(this.playbackPlayButton != null) {
+            this.playbackPlayButton.setBackground(buttonColor);
+            this.playbackPlayButton.setForeground(textColor);
+        }
+        if(this.playbackPauseButton != null) {
+            this.playbackPauseButton.setBackground(buttonColor);
+            this.playbackPauseButton.setForeground(textColor);
+        }
+        if(this.playbackStopButton != null) {
+            this.playbackStopButton.setBackground(buttonColor);
+            this.playbackStopButton.setForeground(textColor);
+        }
+        if(this.playbackLoopCheckBox != null) {
+            this.playbackLoopCheckBox.setBackground(c);
+            this.playbackLoopCheckBox.setForeground(textColor);
+        }
+        if(this.playbackTargetCombo != null) {
+            this.playbackTargetCombo.setBackground(c);
+            this.playbackTargetCombo.setForeground(textColor);
+        }
+        if(this.playbackStepSpinner != null) {
+            this.playbackStepSpinner.setBackground(c);
+            this.playbackStepSpinner.setForeground(textColor);
+        }
+        if(this.playbackIntervalSpinner != null) {
+            this.playbackIntervalSpinner.setBackground(c);
+            this.playbackIntervalSpinner.setForeground(textColor);
+        }
+        if(this.playbackPanel != null) {
+            this.playbackPanel.setBackground(c);
+            this.playbackPanel.setForeground(textColor);
+        }
+        this.playbackTargetLabel.setForeground(textColor);
+        this.playbackStepLabel.setForeground(textColor);
+        this.playbackIntervalLabel.setForeground(textColor);
 
         if(dispMetricMap) {
             currVis.setBackground(c);

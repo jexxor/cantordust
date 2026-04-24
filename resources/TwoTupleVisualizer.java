@@ -18,7 +18,7 @@ import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
 
 public class TwoTupleVisualizer extends Visualizer {
-    private BufferedImage img;
+    private volatile BufferedImage img;
     private int divisions = 20;
     private ArrayList<HashMap<TwoByteTuple, Integer>> cachedFreqMaps;
     HashSet<TwoByteTuple> existingTuples;
@@ -26,6 +26,10 @@ public class TwoTupleVisualizer extends Visualizer {
     private String colorMode = "g";
     private Boolean gradientMode = true;
     private int cycles = 0;
+    private final Object cacheLock = new Object();
+    private final Object renderRequestLock = new Object();
+    private boolean renderWorkerRunning = false;
+    private int pendingRenderGeneration = 0;
 
     public TwoTupleVisualizer(int windowSize, GhidraSrc cantordust, JFrame frame) {
         super(windowSize, cantordust);
@@ -56,32 +60,91 @@ public class TwoTupleVisualizer extends Visualizer {
     }
 
     public void constructImageAsync() {
-        new Thread(() -> {
-            //initializeCaches();
+        if(!isShowing() && mainInterface.currVis != this) {
+            return;
+        }
+        synchronized(renderRequestLock) {
+            pendingRenderGeneration++;
+            if(renderWorkerRunning) {
+                return;
+            }
+            renderWorkerRunning = true;
+        }
+
+        Thread worker = new Thread(() -> processRenderRequests(), "cantordust-twotuple-render");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    private void processRenderRequests() {
+        while(true) {
+            int generation;
+            synchronized(renderRequestLock) {
+                generation = pendingRenderGeneration;
+            }
+
+            constructImage();
+
+            synchronized(renderRequestLock) {
+                if(generation == pendingRenderGeneration) {
+                    renderWorkerRunning = false;
+                    return;
+                }
+            }
+        }
+    }
+
+    private void constructImage() {
+        final int[] bounds = new int[2];
+        final byte[][] dataHolder = new byte[1][];
+        Runnable captureState = () -> {
             dataMicroSlider.setMinimum(dataMacroSlider.getValue());
             dataMicroSlider.setMaximum(dataMacroSlider.getUpperValue());
             byte[] data = cantordust.getMainInterface().getData();
-            int low = Math.max(0, Math.min(dataMicroSlider.getValue(), data.length - 1));
+            dataHolder[0] = data;
+            int low = Math.max(0, Math.min(dataMicroSlider.getValue(), Math.max(0, data.length - 1)));
             int high = Math.max(low + 1, Math.min(dataMicroSlider.getUpperValue(), data.length));
+            bounds[0] = low;
+            bounds[1] = high;
+        };
 
-            this.img = new BufferedImage(256, 256, BufferedImage.TYPE_INT_ARGB);
+        try {
+            if(SwingUtilities.isEventDispatchThread()) {
+                captureState.run();
+            } else {
+                SwingUtilities.invokeAndWait(captureState);
+            }
+        } catch (Exception ignored) {
+            return;
+        }
 
-            gradientPlot(img.createGraphics(), low, high);
+        if(dataHolder[0] == null || dataHolder[0].length == 0) {
+            return;
+        }
+
+        BufferedImage nextImage = new BufferedImage(256, 256, BufferedImage.TYPE_INT_ARGB);
+        gradientPlot(nextImage.createGraphics(), bounds[0], bounds[1]);
+        SwingUtilities.invokeLater(() -> {
+            img = nextImage;
             repaint();
-        }).start();
+        });
     }
 
     private HashMap<TwoByteTuple, Integer> countedByteFrequencies(int low, int high) {
+        return countedByteFrequencies(low, high, 1);
+    }
+
+    private HashMap<TwoByteTuple, Integer> countedByteFrequencies(int low, int high, int stride) {
         // data needs fixed for large file sizes
         byte[] data = cantordust.getMainInterface().getData();
         HashMap<TwoByteTuple, Integer> tuples = new HashMap<>();
         int start = Math.max(0, low);
         int end = Math.min(high, data.length);
-        for(int tupleIdx = start; tupleIdx < end - 1; tupleIdx++) {
+        int step = Math.max(1, stride);
+        for(int tupleIdx = start; tupleIdx < end - 1; tupleIdx += step) {
             TwoByteTuple tuple = new TwoByteTuple(data[tupleIdx], data[tupleIdx+1]);
             Integer freq = tuples.get(tuple);
             if(freq != null) {
-                existingTuples.add(tuple);
                 tuples.put(tuple, freq + 1);
             } else {
                 tuples.put(tuple,  1);
@@ -91,24 +154,48 @@ public class TwoTupleVisualizer extends Visualizer {
     }
 
     private void initializeCaches() {
-        cachedFreqMaps = new ArrayList<HashMap<TwoByteTuple, Integer>>();
-        existingTuples = new HashSet<TwoByteTuple>();
+        ArrayList<HashMap<TwoByteTuple, Integer>> newCache = new ArrayList<HashMap<TwoByteTuple, Integer>>();
+        HashSet<TwoByteTuple> newExistingTuples = new HashSet<TwoByteTuple>();
         // data needs fixed for large file sizes
         byte[] data = cantordust.getMainInterface().getData();
         int cachedSize = Math.max(1, data.length / divisions);
         for(int div = 0; div < divisions - 1; div++) {
-            cachedFreqMaps.add(countedByteFrequencies(div*cachedSize, (div+1)*cachedSize));
+            newCache.add(countedByteFrequencies(div*cachedSize, (div+1)*cachedSize));
         }
-        cachedFreqMaps.add(countedByteFrequencies((divisions-1)*cachedSize, data.length));
+        newCache.add(countedByteFrequencies((divisions-1)*cachedSize, data.length));
+
+        synchronized(cacheLock) {
+            cachedFreqMaps = newCache;
+            existingTuples = newExistingTuples;
+        }
     }
 
     private void gradientPlot(Graphics2D g, int low, int high) {
         cycles += 1;
+        if(mainInterface.isPlaybackActive()) {
+            int range = Math.max(1, high - low);
+            int stride = Math.max(1, range / 131072);
+            HashMap<TwoByteTuple, Integer> playbackFreqs = countedByteFrequencies(low, high, stride);
+            for(TwoByteTuple twoTuple: playbackFreqs.keySet()) {
+                int freq = playbackFreqs.get(twoTuple);
+                g.setColor(getColor(freq, colorMode));
+                int x = twoTuple.x & 0xff;
+                int y = twoTuple.y & 0xff;
+                g.fill(new Rectangle2D.Double(y, x, 1, 1));
+            }
+            g.dispose();
+            return;
+        }
+
         // data needs fixed for large file sizes
         int cachedSize = Math.max(1, this.cantordust.getMainInterface().getData().length / divisions);
         HashMap<TwoByteTuple, Integer> totalFreqs = new HashMap<>();
         HashMap<TwoByteTuple, Integer> leftStraggler = null;
         HashMap<TwoByteTuple, Integer> rightStraggler = null;
+        ArrayList<HashMap<TwoByteTuple, Integer>> cacheSnapshot;
+        synchronized(cacheLock) {
+            cacheSnapshot = cachedFreqMaps == null ? new ArrayList<HashMap<TwoByteTuple, Integer>>() : new ArrayList<HashMap<TwoByteTuple, Integer>>(cachedFreqMaps);
+        }
         int firstCacheBlockStart = nextBlock(low, cachedSize);
         int lastCacheBlockEnd = lastBlock(high, cachedSize);
         if(firstCacheBlockStart != low) {
@@ -123,8 +210,8 @@ public class TwoTupleVisualizer extends Visualizer {
         }
         for(int currentBlock = firstCacheBlockStart / cachedSize; currentBlock <= lastCacheBlockEnd / cachedSize; currentBlock++) {
             int cacheIndex = currentBlock - 1;
-            if(cacheIndex >= 0 && cacheIndex < cachedFreqMaps.size()) {
-                mergeFreqCounts(cachedFreqMaps.get(cacheIndex), totalFreqs);
+            if(cacheIndex >= 0 && cacheIndex < cacheSnapshot.size()) {
+                mergeFreqCounts(cacheSnapshot.get(cacheIndex), totalFreqs);
             }
         }
 
@@ -200,7 +287,9 @@ public class TwoTupleVisualizer extends Visualizer {
             dataRangeSlider.addChangeListener(new ChangeListener() {
                 public void stateChanged(ChangeEvent e) {
                     if(!dataRangeSlider.getValueIsAdjusting()) {
-                        initializeCaches();
+                        if(!mainInterface.isPlaybackActive()) {
+                            initializeCaches();
+                        }
                         constructImageAsync();
                     }
                 }

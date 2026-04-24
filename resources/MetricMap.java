@@ -14,9 +14,12 @@ import java.awt.Graphics;
 public class MetricMap extends Visualizer{
     protected byte[] data;
     protected static int size_hilbert = 512;
+    private static final int PLAYBACK_RENDER_SIZE = 256;
     protected int[][] pixelMap2D;
     protected int[] pixelMap1D;
     protected HashMap<Integer, Integer> memLoc = new HashMap<Integer, Integer>();
+    private volatile int memLocBaseOffset = 0;
+    private volatile Scurve renderLookupMap;
     private volatile BufferedImage renderedImage;
     protected Popup popupAddr;
     protected JPopupMenu popupMenu;
@@ -39,6 +42,7 @@ public class MetricMap extends Visualizer{
         mouseConfig(frame, isCurrentView);
         this.csource = new ColorEntropy(this.cantordust, getCurrentData());
         this.map = new Hilbert(this.cantordust, 2, (int)(Math.log(getWindowSize())/Math.log(2)));
+        this.renderLookupMap = this.map;
         draw();
     }
     
@@ -52,6 +56,7 @@ public class MetricMap extends Visualizer{
         mouseConfig(frame, isCurrentView);
         this.csource = new ColorEntropy(this.cantordust, getCurrentData());
         this.map = new Hilbert(this.cantordust, 2, (int)(Math.log(getWindowSize())/Math.log(2)));
+        this.renderLookupMap = this.map;
         draw();
     }
 
@@ -165,25 +170,34 @@ public class MetricMap extends Visualizer{
                         yf = (int)bv.getLocationOnScreen().getY() + e.getY() - 26;
                     }
                     TwoIntegerTuple p = new TwoIntegerTuple(x_point, y_point);
-                    int currentLow = dataMicroSlider.getValue();
-                    if(map == null) {
+                    Scurve lookupMap = renderLookupMap != null ? renderLookupMap : map;
+                    if(lookupMap == null) {
                         return;
                     }
-                    int loc = map.index(p);
-                    Integer relativeLocation = memLoc.get(loc);
+                    int loc = lookupMap.index(p);
+                    HashMap<Integer, Integer> memLocSnapshot = memLoc;
+                    Integer relativeLocation = memLocSnapshot.get(loc);
                     if(relativeLocation == null) {
                         return;
                     }
-                    int memoryLocation = relativeLocation + currentLow;
-                    if(dataRangeSlider != null){
-                        memoryLocation = memoryLocation + cantordust.getMainInterface().dataSlider.getValue();
-                    }
+                    int memoryLocation = memLocBaseOffset + relativeLocation;
                     long minGhidraAddress = Long.parseLong(cantordust.getCurrentProgram().getMinAddress().toString(false), 16);
                     String currentAddress = Long.toHexString(minGhidraAddress+(long)memoryLocation).toUpperCase();
                     JLabel l;
                     if(isClassifier) {
                         ClassifierModel classifier = cantordust.getClassifier();
-                        l = new JLabel(ClassifierModel.classes[classifier.classAtIndex(memoryLocation)]);
+                        if(classifier != null) {
+                            int classIndex = 0;
+                            try {
+                                classIndex = classifier.classAtIndex(memoryLocation);
+                            } catch(RuntimeException ignored) {
+                                classIndex = 0;
+                            }
+                            classIndex = Math.max(0, Math.min(ClassifierModel.classes.length - 1, classIndex));
+                            l = new JLabel(ClassifierModel.classes[classIndex]);
+                        } else {
+                            l = new JLabel(currentAddress);
+                        }
                     } else {
                         l = new JLabel(currentAddress);
                     }
@@ -217,12 +231,14 @@ public class MetricMap extends Visualizer{
     }
 
     private int scaleToMapX(int viewX) {
-        int mapWidth = map != null ? map.dimensions().get(0) : size_hilbert;
+        Scurve lookupMap = renderLookupMap != null ? renderLookupMap : map;
+        int mapWidth = lookupMap != null ? lookupMap.dimensions().get(0) : size_hilbert;
         return Math.max(0, Math.min(mapWidth - 1, (int)Math.floor((viewX * (double)mapWidth) / Math.max(1, getWidth()))));
     }
 
     private int scaleToMapY(int viewY) {
-        int mapHeight = map != null ? map.dimensions().get(1) : size_hilbert;
+        Scurve lookupMap = renderLookupMap != null ? renderLookupMap : map;
+        int mapHeight = lookupMap != null ? lookupMap.dimensions().get(1) : size_hilbert;
         return Math.max(0, Math.min(mapHeight - 1, (int)Math.floor((viewY * (double)mapHeight) / Math.max(1, getHeight()))));
     }
     
@@ -235,6 +251,50 @@ public class MetricMap extends Visualizer{
             currentData[i-lowerBound] = data[i];
         }
         return currentData;
+    }
+
+    private int getCurrentDataBaseOffset() {
+        int baseOffset = dataMicroSlider.getValue();
+        if(dataRangeSlider != null) {
+            baseOffset += dataRangeSlider.getValue();
+        }
+        return Math.max(0, baseOffset);
+    }
+
+    private Scurve getRenderMapForCurrentState(Scurve activeMap) {
+        if(activeMap == null) {
+            return null;
+        }
+        if(!mainInterface.isPlaybackActive()) {
+            return activeMap;
+        }
+
+        double playbackSize = Math.pow(PLAYBACK_RENDER_SIZE, 2);
+        try {
+            if(activeMap.isType("hilbert")) {
+                return new Hilbert(cantordust, 2, playbackSize);
+            }
+            if(activeMap.isType("zorder")) {
+                return new Zorder(cantordust, 2, playbackSize);
+            }
+            if(activeMap.isType("hcurve")) {
+                return new HCurve(cantordust, 2, playbackSize);
+            }
+            if(activeMap.isType("linear")) {
+                Linear playbackLinear = new Linear(cantordust, 2, playbackSize);
+                int sourceWidth = Math.max(1, activeMap.getWidth());
+                int sourceHeight = Math.max(1, activeMap.getHeight());
+                int reference = Math.max(sourceWidth, sourceHeight);
+                double scale = (double)PLAYBACK_RENDER_SIZE / (double)Math.max(1, reference);
+                playbackLinear.setWidth(Math.max(1, (int)Math.round(sourceWidth * scale)));
+                playbackLinear.setHeight(Math.max(1, (int)Math.round(sourceHeight * scale)));
+                return playbackLinear;
+            }
+        } catch(RuntimeException ignored) {
+            return activeMap;
+        }
+
+        return activeMap;
     }
 
     public void createPopupMenu(JFrame frame){
@@ -468,6 +528,9 @@ public class MetricMap extends Visualizer{
     }
 
     private void draw() {
+        if(!isShowing() && mainInterface.currVis != this) {
+            return;
+        }
         if(!csource.type.equals("classifierPrediction")) {
             isClassifier = false;
         }
@@ -500,26 +563,34 @@ public class MetricMap extends Visualizer{
         if(currentData.length == 0) {
             return;
         }
+        int currentDataBaseOffset = getCurrentDataBaseOffset();
 
         ColorSource activeSource = this.csource;
         Scurve activeMap = this.map;
         String activePlotType = this.type_plot;
+        Scurve renderMap = getRenderMapForCurrentState(activeMap);
+        if(renderMap == null) {
+            return;
+        }
 
         activeSource.setData(currentData);
+        if(activeSource instanceof ColorClassifierPrediction) {
+            ((ColorClassifierPrediction) activeSource).setBaseOffset(currentDataBaseOffset);
+        }
         if(activeSource.isType("spectrum")) {
             activeSource = new ColorSpectrum(cantordust, currentData);
         }
 
         if(activePlotType.equals("unrolled")) {
-            this.cantordust.cdprint("building unrolled "+activeMap.type+" curve\n");
-            drawMap_unrolled(activeMap.type, size_hilbert, activeSource/*, dst, prog*/);
+            this.cantordust.cdprint("building unrolled "+renderMap.type+" curve\n");
+            drawMap_unrolled(renderMap.type, size_hilbert, activeSource/*, dst, prog*/);
         } else if(activePlotType.equals("square")) {
-            this.cantordust.cdprint("Building square "+activeMap.type+" curve\n");
-            drawMap_square(activeMap, activeSource/*, dst, prog*/);
+            this.cantordust.cdprint("Building square "+renderMap.type+" curve\n");
+            drawMap_square(renderMap, activeSource, currentDataBaseOffset/*, dst, prog*/);
         }
     }
 
-    public void drawMap_square(Scurve activeMap, ColorSource activeSource/*, String name, prog */) {
+    public void drawMap_square(Scurve activeMap, ColorSource activeSource, int dataBaseOffset/*, String name, prog */) {
         // prog.set_target(Math.pow(size, 2))
         // if(this.map.isType("hilbert")){
         //     cantordust.cdprint("")
@@ -543,7 +614,7 @@ public class MetricMap extends Visualizer{
 
         int[] nextPixelMap1D = convertPixelMapTo1D(nextPixelMap2D);
         //c.save(name);
-        plotMap(dimensions, nextPixelMap1D, nextMemLoc);
+        plotMap(dimensions, nextPixelMap1D, nextMemLoc, dataBaseOffset, activeMap);
     }
 
     public void drawMap_unrolled(String map_type, int size, ColorSource csource/*, String name, prog */) {
@@ -638,10 +709,10 @@ public class MetricMap extends Visualizer{
         // panel.add( createImageLabel(this.pixelMap1D, width, height) );
         // panel.revalidate();
         // panel.repaint();
-        plotMap(dimensions, this.pixelMap1D, this.memLoc);
+        plotMap(dimensions, this.pixelMap1D, this.memLoc, this.memLocBaseOffset, this.renderLookupMap);
     }
 
-    private void plotMap(TwoIntegerTuple dimensions, int[] pixels, HashMap<Integer, Integer> nextMemLoc){
+    private void plotMap(TwoIntegerTuple dimensions, int[] pixels, HashMap<Integer, Integer> nextMemLoc, int nextBaseOffset, Scurve nextLookupMap){
         int width = dimensions.get(0);
         int height = dimensions.get(1);
         BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
@@ -649,7 +720,9 @@ public class MetricMap extends Visualizer{
         raster.setPixels(0, 0, width, height, pixels);
 
         SwingUtilities.invokeLater(() -> {
+            this.memLocBaseOffset = nextBaseOffset;
             this.memLoc = nextMemLoc;
+            this.renderLookupMap = nextLookupMap;
             this.renderedImage = image;
             repaint();
         });

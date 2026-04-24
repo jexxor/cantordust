@@ -19,7 +19,11 @@ import javax.swing.SwingUtilities;
  * one for the lower value and one for the upper value.
  */
 class BitMapSliderUI extends RangeSliderUI {
-    private BufferedImage img;
+    private volatile BufferedImage img;
+    private final Object bitmapRequestLock = new Object();
+    private int pendingLow = 0;
+    private int pendingHigh = 0;
+    private boolean bitmapWorkerRunning = false;
 
     public BitMapSliderUI(BitMapSlider b) {
         super(b);
@@ -63,14 +67,40 @@ class BitMapSliderUI extends RangeSliderUI {
      * Makes a bitmap in a new thread, this makes it so updating the slider does not cause everything else to hang
      */
     public void makeBitmapAsync(int low, int high) {
-        Thread worker = new Thread(() -> {
-            if(((BitMapSlider) this.slider).data == null) {
+        synchronized(bitmapRequestLock) {
+            pendingLow = low;
+            pendingHigh = high;
+            if(bitmapWorkerRunning) {
                 return;
             }
-            makeBitmap(low, high);
-        }, "cantordust-slider-bitmap");
+            bitmapWorkerRunning = true;
+        }
+
+        Thread worker = new Thread(() -> processBitmapRequests(), "cantordust-slider-bitmap");
         worker.setDaemon(true);
         worker.start();
+    }
+
+    private void processBitmapRequests() {
+        while(true) {
+            int low;
+            int high;
+            synchronized(bitmapRequestLock) {
+                low = pendingLow;
+                high = pendingHigh;
+            }
+
+            if(((BitMapSlider) this.slider).data != null) {
+                makeBitmap(low, high);
+            }
+
+            synchronized(bitmapRequestLock) {
+                if(low == pendingLow && high == pendingHigh) {
+                    bitmapWorkerRunning = false;
+                    return;
+                }
+            }
+        }
     }
 
     /**
@@ -113,7 +143,7 @@ class BitMapSliderUI extends RangeSliderUI {
             }
         }
 
-        this.slider.repaint();
+        SwingUtilities.invokeLater(() -> this.slider.repaint());
     }
 
     /**

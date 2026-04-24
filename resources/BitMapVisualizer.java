@@ -19,6 +19,7 @@ import javax.swing.JFrame;
 import javax.swing.JMenuItem;
 import javax.swing.JPopupMenu;
 import javax.swing.JSlider;
+import javax.swing.SwingUtilities;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
 
@@ -31,8 +32,11 @@ public class BitMapVisualizer extends Visualizer {
     private JButton dataOffsetUpButton;
     private JButton dataMicroUpButton;
     private int mode;
+    private final Object renderRequestLock = new Object();
+    private boolean renderWorkerRunning = false;
+    private int pendingRenderGeneration = 0;
 
-    private Image img;
+    private volatile Image img;
 
     public BitMapVisualizer(int windowSize, GhidraSrc cantordust, JFrame frame) {
         super(windowSize, cantordust);
@@ -109,14 +113,7 @@ public class BitMapVisualizer extends Visualizer {
             }
         });
 
-        // Wait for the window to be loaded before building an image
-        new Thread(() -> {
-            while(this.getVisibleRect().getWidth() == 0) {
-            	// Wait for the window to be loaded
-            }
-
-            constructImage();
-        }).start();
+        SwingUtilities.invokeLater(() -> constructImageAsync());
     }
     
     public void createPopupMenu(JFrame frame){
@@ -186,32 +183,99 @@ public class BitMapVisualizer extends Visualizer {
     }
 
     public void constructImageAsync() {
-        new Thread(() -> {
+        if(!isShowing() && mainInterface.currVis != this) {
+            return;
+        }
+        synchronized(renderRequestLock) {
+            pendingRenderGeneration++;
+            if(renderWorkerRunning) {
+                return;
+            }
+            renderWorkerRunning = true;
+        }
+
+        Thread worker = new Thread(() -> processRenderRequests(), "cantordust-bitmap-render");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    private void processRenderRequests() {
+        while(true) {
+            int generation;
+            synchronized(renderRequestLock) {
+                generation = pendingRenderGeneration;
+            }
+
             constructImage();
-        }).start();
+
+            synchronized(renderRequestLock) {
+                if(generation == pendingRenderGeneration) {
+                    renderWorkerRunning = false;
+                    return;
+                }
+            }
+        }
     }
 
     private void constructImage() {
-        dataMicroSlider.setMinimum(dataMacroSlider.getValue());
-        dataMicroSlider.setMaximum(dataMacroSlider.getUpperValue());
-        int low = dataMicroSlider.getValue();
-        int high = dataMicroSlider.getUpperValue();
-        int width = dataWidthSlider.getValue();
-        int offset = dataOffsetSlider.getValue();
+        final int[] renderBounds = new int[4];
+        final Rectangle[] windowHolder = new Rectangle[1];
+        final byte[][] dataHolder = new byte[1][];
 
-        byte[] data = mainInterface.getData();
-        byte[] data_offset = new byte[data.length];
-        int xMax = width;
+        Runnable captureState = () -> {
+            dataMicroSlider.setMinimum(dataMacroSlider.getValue());
+            dataMicroSlider.setMaximum(dataMacroSlider.getUpperValue());
+
+            byte[] currentData = mainInterface.getData();
+            dataHolder[0] = currentData;
+            int dataLength = currentData.length;
+            int low = Math.max(0, Math.min(dataMicroSlider.getValue(), Math.max(0, dataLength - 1)));
+            int high = Math.max(low + 1, Math.min(dataMicroSlider.getUpperValue(), dataLength));
+
+            renderBounds[0] = low;
+            renderBounds[1] = high;
+            renderBounds[2] = Math.max(1, dataWidthSlider.getValue());
+            renderBounds[3] = Math.max(0, dataOffsetSlider.getValue());
+            windowHolder[0] = getVisibleRect();
+        };
+
+        try {
+            if(SwingUtilities.isEventDispatchThread()) {
+                captureState.run();
+            } else {
+                SwingUtilities.invokeAndWait(captureState);
+            }
+        } catch (Exception ignored) {
+            return;
+        }
+
+        byte[] data = dataHolder[0];
+        if(data == null || data.length == 0) {
+            return;
+        }
+
+        int low = renderBounds[0];
+        int high = renderBounds[1];
+        int width = renderBounds[2];
+        int offset = Math.min(renderBounds[3], Math.max(0, data.length - 1));
+        int xMax = Math.max(1, width);
         int y = 0;
         int x = 0;
         int i = 0;
 
-        Rectangle window = getVisibleRect();
+        Rectangle window = windowHolder[0];
+        if(window == null) {
+            window = new Rectangle(1, 1);
+        }
+        int windowWidth = Math.max(1, (int) window.getWidth());
+        int windowHeight = Math.max(1, (int) window.getHeight());
 
-        for(i = 0; i < data.length - offset; i++){
+        byte[] data_offset = new byte[data.length];
+        int nonOffsetLength = Math.max(0, data.length - offset);
+        for(i = 0; i < nonOffsetLength; i++) {
             data_offset[i] = data[i + offset];
         }
-        for(i = data.length-offset; i < data.length; i++){
+        for(i = nonOffsetLength; i < data.length; i++) {
             data_offset[i] = 0;
         }
 
@@ -221,10 +285,10 @@ public class BitMapVisualizer extends Visualizer {
         switch(mode) {
             //32bpp ARGB
             case 1:
-                bimg = new BufferedImage(width, (high-low)/xMax/4 + 1, BufferedImage.TYPE_INT_ARGB);
+                bimg = new BufferedImage(width, Math.max(1, (high - low) / xMax / 4 + 1), BufferedImage.TYPE_INT_ARGB);
                 g = bimg.createGraphics();
-                for(i = low; i < high-4; i+=4) {
-                    int pixel = ((data_offset[i+3] << 24) + (data_offset[i+2] << 16) + (data_offset[i+1] << 8) + data_offset[i]) & 0xFFFFFFFF;
+                for(i = low; i < high - 4; i += 4) {
+                    int pixel = ((data_offset[i + 3] << 24) + (data_offset[i + 2] << 16) + (data_offset[i + 1] << 8) + data_offset[i]) & 0xFFFFFFFF;
                     g.setColor(new Color(pixel, true));
                     g.fill(new Rectangle2D.Double(x, y, 1, 1));
                     x++;
@@ -238,10 +302,10 @@ public class BitMapVisualizer extends Visualizer {
 
             //24bpp RGB
             case 2:
-                bimg = new BufferedImage(width, (high-low)/xMax/3 + 1, BufferedImage.TYPE_INT_ARGB);
+                bimg = new BufferedImage(width, Math.max(1, (high - low) / xMax / 3 + 1), BufferedImage.TYPE_INT_ARGB);
                 g = bimg.createGraphics();
-                for (i=low; i < high-3; i+=3){
-                    int pixel = ((data_offset[i+2] << 16) + (data_offset[i+1] << 8) + data_offset[i]) & 0xFFFFFFFF;
+                for(i = low; i < high - 3; i += 3) {
+                    int pixel = ((data_offset[i + 2] << 16) + (data_offset[i + 1] << 8) + data_offset[i]) & 0xFFFFFFFF;
                     g.setColor(new Color(pixel));
                     g.fill(new Rectangle2D.Double(x, y, 1, 1));
                     x++;
@@ -255,14 +319,14 @@ public class BitMapVisualizer extends Visualizer {
 
             //16bpp ARGB1555 color is too saturated
             case 3:
-                bimg = new BufferedImage(width, (high-low)/xMax/2 + 1, BufferedImage.TYPE_INT_ARGB);
+                bimg = new BufferedImage(width, Math.max(1, (high - low) / xMax / 2 + 1), BufferedImage.TYPE_INT_ARGB);
                 g = bimg.createGraphics();
-                for (i = low; i < high-2; i+=2){
-                    int alpha = (data_offset[i+1] & 0x80) >> 7;
-                    float red = ((data_offset[i+1] & 0x7C) >> 2)/(0x1F);
-                    float green = (((data_offset[i+1] & 0x03) << 3) + ((data[i] & 0xE0) >> 5))/(0x1F);
-                    float blue  = (data_offset[i] & 0x1F)/(0x1F); 
-                    g.setColor(new Color(red,green,blue,alpha));
+                for(i = low; i < high - 2; i += 2) {
+                    int alpha = (data_offset[i + 1] & 0x80) >> 7;
+                    float red = ((data_offset[i + 1] & 0x7C) >> 2) / (0x1F);
+                    float green = (((data_offset[i + 1] & 0x03) << 3) + ((data[i] & 0xE0) >> 5)) / (0x1F);
+                    float blue = (data_offset[i] & 0x1F) / (0x1F);
+                    g.setColor(new Color(red, green, blue, alpha));
                     g.fill(new Rectangle2D.Double(x, y, 1, 1));
                     x++;
                     if(x == xMax) {
@@ -275,10 +339,10 @@ public class BitMapVisualizer extends Visualizer {
 
             // entropy
             case 4:
-                bimg = new BufferedImage(width, (high-low)/xMax + 1, BufferedImage.TYPE_INT_ARGB);
+                bimg = new BufferedImage(width, Math.max(1, (high - low) / xMax + 1), BufferedImage.TYPE_INT_ARGB);
                 g = bimg.createGraphics();
                 ColorEntropy entropy = new ColorEntropy(cantordust, data);
-                for (i = low; i < high; i++){
+                for(i = low; i < high; i++) {
                     Rgb rgb = entropy.getPoint(i);
                     g.setColor(new Color(rgb.r, rgb.g, rgb.b));
                     g.fill(new Rectangle2D.Double(x, y, 1, 1));
@@ -293,11 +357,11 @@ public class BitMapVisualizer extends Visualizer {
 
             // 8bpp
             default:
-                bimg = new BufferedImage(width, (high-low)/xMax + 1, BufferedImage.TYPE_INT_ARGB);
+                bimg = new BufferedImage(width, Math.max(1, (high - low) / xMax + 1), BufferedImage.TYPE_INT_ARGB);
                 g = bimg.createGraphics();
-                for(i = low; i < high; i++){
+                for(i = low; i < high; i++) {
                     int unsignedByte = data_offset[i] & 0xFF;
-                    g.setColor(new Color(0,unsignedByte,0));
+                    g.setColor(new Color(0, unsignedByte, 0));
                     g.fill(new Rectangle2D.Double(x, y, 1, 1));
                     x++;
                     if(x == xMax) {
@@ -306,10 +370,14 @@ public class BitMapVisualizer extends Visualizer {
                     }
                 }
                 g.dispose();
-            }
-        // Scale the image
-        this.img = bimg.getScaledInstance((int) window.getWidth(), (int) window.getHeight(), Image.SCALE_SMOOTH);
-        repaint();
+        }
+
+        int scaleMode = mainInterface.isPlaybackActive() ? Image.SCALE_FAST : Image.SCALE_SMOOTH;
+        Image scaledImage = bimg.getScaledInstance(windowWidth, windowHeight, scaleMode);
+        SwingUtilities.invokeLater(() -> {
+            img = scaledImage;
+            repaint();
+        });
     }
     
     public static int getWindowSize() {
