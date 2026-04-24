@@ -487,6 +487,18 @@ public class MainInterface extends JPanel {
             }
         });
 
+        // Ensure first-entry slider bitmaps are built from finalized bounds.
+        SwingUtilities.invokeLater(() -> {
+            if(macroSlider.ui != null) {
+                macroSlider.ui.makeBitmapAsync(0, data.length);
+            }
+            if(microSlider.ui != null) {
+                int low = Math.max(0, macroSlider.getValue() - 1);
+                int high = Math.min(data.length, macroSlider.getUpperValue());
+                microSlider.ui.makeBitmapAsync(low, high);
+            }
+        });
+
         darkTheme();
     }
 
