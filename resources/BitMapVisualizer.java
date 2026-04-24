@@ -49,7 +49,7 @@ public class BitMapVisualizer extends Visualizer {
         dataOffsetUpButton = mainInterface.offsetUpButton;
         dataMicroUpButton = mainInterface.microUpButton;
         mode = 0;
-        this.img = new BufferedImage(1,1,1);
+        this.img = null;
         createPopupMenu(frame);
 
         dataMacroSlider.addChangeListener(new ChangeListener() {
@@ -179,7 +179,7 @@ public class BitMapVisualizer extends Visualizer {
     }
 
     public void constructImageAsync() {
-        if(!isShowing() && mainInterface.currVis != this) {
+        if(!isShowing() && mainInterface.currVis != this && img != null) {
             return;
         }
         synchronized(renderRequestLock) {

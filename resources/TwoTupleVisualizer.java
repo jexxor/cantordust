@@ -60,7 +60,7 @@ public class TwoTupleVisualizer extends Visualizer {
     }
 
     public void constructImageAsync() {
-        if(!isShowing() && mainInterface.currVis != this) {
+        if(!isShowing() && mainInterface.currVis != this && img != null) {
             return;
         }
         synchronized(renderRequestLock) {
