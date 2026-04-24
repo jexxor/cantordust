@@ -17,7 +17,7 @@ Take a look at [this blogpost](https://inside.battelle.org/blog-details/battelle
 
 ### Preview
 
-https://github.com/user-attachments/assets/6749ea27-79bb-4639-9eb7-fd2a3f9efd0a
+https://github.com/user-attachments/assets/19ff888f-957d-4b63-aad2-89ba43ee2ba7
 
 ### Fork changes
 
