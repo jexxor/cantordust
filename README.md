@@ -16,7 +16,7 @@ Take a look at [this blogpost](https://inside.battelle.org/blog-details/battelle
 
 ## Fork changes
 
-<video src="./preview/demo.mp4" controls muted loop playsinline width="100%"></video>
+[![Watch Demo]()](./preview/demo.mp4)
 
 This fork currently includes the following behavior changes:
 
