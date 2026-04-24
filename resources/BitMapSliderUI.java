@@ -5,7 +5,6 @@ import java.awt.Dimension;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
-import java.util.concurrent.TimeUnit;
 import java.awt.Cursor;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
@@ -13,6 +12,7 @@ import java.awt.Shape;
 import java.awt.event.MouseEvent;
 
 import javax.swing.JSlider;
+import javax.swing.SwingUtilities;
 
 /**
  * UI delegate for the BitMapSlider component. BitMapSliderUI paints two thumbs,
@@ -23,25 +23,11 @@ class BitMapSliderUI extends RangeSliderUI {
 
     public BitMapSliderUI(BitMapSlider b) {
         super(b);
-        new Thread(() -> {
-            try {
-                TimeUnit.SECONDS.sleep(1);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-            while(((BitMapSlider) this.slider).data == null) {
-                try {
-                    TimeUnit.SECONDS.sleep(1);
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
-            	// Wait until the data field is populated
-            }
-            int low = ((BitMapSlider) this.slider).getValue()-1;
+        SwingUtilities.invokeLater(() -> {
+            int low = ((BitMapSlider) this.slider).getValue() - 1;
             int high = ((BitMapSlider) this.slider).getUpperValue();
-
-            makeBitmap(low, high);
-        }).start();
+            makeBitmapAsync(low, high);
+        });
     }
     
     /**
@@ -77,12 +63,14 @@ class BitMapSliderUI extends RangeSliderUI {
      * Makes a bitmap in a new thread, this makes it so updating the slider does not cause everything else to hang
      */
     public void makeBitmapAsync(int low, int high) {
-        new Thread(() -> {
-            while(((BitMapSlider) this.slider).data == null) {
-            	// Wait for the data field to be populated if it isn't
+        Thread worker = new Thread(() -> {
+            if(((BitMapSlider) this.slider).data == null) {
+                return;
             }
             makeBitmap(low, high);
-        }).start();
+        }, "cantordust-slider-bitmap");
+        worker.setDaemon(true);
+        worker.start();
     }
 
     /**
@@ -90,6 +78,9 @@ class BitMapSliderUI extends RangeSliderUI {
      */
     private void makeBitmap(int low, int high) {
         byte[] data = ((BitMapSlider) this.slider).data;
+        if(data == null || data.length == 0) {
+            return;
+        }
 
         // Check if low or high are out of range
         if (high > data.length) {
@@ -98,6 +89,12 @@ class BitMapSliderUI extends RangeSliderUI {
 
         if (low < 0) {
             low = 0;
+        }
+        if (low >= data.length) {
+            low = data.length - 1;
+        }
+        if (high <= low) {
+            high = Math.min(data.length, low + 1);
         }
 
         // Calculate width and height
@@ -202,6 +199,15 @@ class BitMapSliderUI extends RangeSliderUI {
         private boolean windowSliding;
         private double previousY;
 
+        private boolean isBetweenThumbs(int x, int y) {
+            if(thumbRect.contains(x, y) || upperThumbRect.contains(x, y)) {
+                return false;
+            }
+            int gapStart = Math.min(thumbRect.y + thumbRect.height, upperThumbRect.y + upperThumbRect.height);
+            int gapEnd = Math.max(thumbRect.y, upperThumbRect.y);
+            return y > gapStart && y < gapEnd;
+        }
+
         private void updateRectanglesForSlidingWindow(MouseEvent e) {
             if(windowSliding) {
                 double diff = previousY - e.getY();
@@ -210,9 +216,10 @@ class BitMapSliderUI extends RangeSliderUI {
                 if(upperThumbRectNewY < yPositionForValue(slider.getMaximum()) && thumbRectNewY > yPositionForValue(slider.getMinimum())) {
                     upperThumbRect.setLocation((int)(upperThumbRect.getX()), upperThumbRectNewY);
                     thumbRect.setLocation((int)(thumbRect.getX()), thumbRectNewY);
+                    double oldY = previousY;
                     previousY = e.getY();
                     slider.repaint();
-                    slider.setCursor(new Cursor(e.getY() > previousY ? Cursor.S_RESIZE_CURSOR: Cursor.N_RESIZE_CURSOR));
+                    slider.setCursor(new Cursor(e.getY() > oldY ? Cursor.S_RESIZE_CURSOR: Cursor.N_RESIZE_CURSOR));
                 }
             }
         }
@@ -274,7 +281,7 @@ class BitMapSliderUI extends RangeSliderUI {
             } else {
                 if (thumbRect.contains(x, y)) {
                     lowerHover = true;
-                } else if (upperThumbRect.contains(y, x)) {
+                } else if (upperThumbRect.contains(x, y)) {
                     upperHover = true;
                 }
             }
@@ -284,7 +291,7 @@ class BitMapSliderUI extends RangeSliderUI {
             } else {
                 slider.setCursor(new Cursor(Cursor.DEFAULT_CURSOR));
             }
-            if(y > thumbRect.getY() && y < upperThumbRect.getY() && !thumbRect.contains(0, y) && !upperThumbRect.contains(0, y)) {
+            if(isBetweenThumbs(x, y)) {
                 slider.setCursor(new Cursor(Cursor.HAND_CURSOR));
             }
         }
@@ -295,7 +302,7 @@ class BitMapSliderUI extends RangeSliderUI {
             int x = e.getX();
             int y = e.getY();
 
-            if(y > thumbRect.getY() && !thumbRect.contains(0, y) && y < upperThumbRect.getY() && !upperThumbRect.contains(0, y)) {
+            if(isBetweenThumbs(x, y)) {
                 windowSliding = true;
                 previousY = y;
                 return;
@@ -319,7 +326,7 @@ class BitMapSliderUI extends RangeSliderUI {
             } else {
                 if (thumbRect.contains(x, y)) {
                     lowerPressed = true;
-                } else if (upperThumbRect.contains(y, x)) {
+                } else if (upperThumbRect.contains(x, y)) {
                     upperPressed = true;
                 }
             }

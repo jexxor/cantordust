@@ -22,6 +22,7 @@ public class TwoTupleVisualizer extends Visualizer {
     private int divisions = 20;
     private ArrayList<HashMap<TwoByteTuple, Integer>> cachedFreqMaps;
     HashSet<TwoByteTuple> existingTuples;
+    private Popup coordinatePopup;
     private String colorMode = "g";
     private Boolean gradientMode = true;
     private int cycles = 0;
@@ -59,8 +60,9 @@ public class TwoTupleVisualizer extends Visualizer {
             //initializeCaches();
             dataMicroSlider.setMinimum(dataMacroSlider.getValue());
             dataMicroSlider.setMaximum(dataMacroSlider.getUpperValue());
-            int low = dataMicroSlider.getValue();
-            int high = dataMicroSlider.getUpperValue();
+            byte[] data = cantordust.getMainInterface().getData();
+            int low = Math.max(0, Math.min(dataMicroSlider.getValue(), data.length - 1));
+            int high = Math.max(low + 1, Math.min(dataMicroSlider.getUpperValue(), data.length));
 
             this.img = new BufferedImage(256, 256, BufferedImage.TYPE_INT_ARGB);
 
@@ -73,7 +75,9 @@ public class TwoTupleVisualizer extends Visualizer {
         // data needs fixed for large file sizes
         byte[] data = cantordust.getMainInterface().getData();
         HashMap<TwoByteTuple, Integer> tuples = new HashMap<>();
-        for(int tupleIdx=low; tupleIdx < high-1; tupleIdx++) {
+        int start = Math.max(0, low);
+        int end = Math.min(high, data.length);
+        for(int tupleIdx = start; tupleIdx < end - 1; tupleIdx++) {
             TwoByteTuple tuple = new TwoByteTuple(data[tupleIdx], data[tupleIdx+1]);
             Integer freq = tuples.get(tuple);
             if(freq != null) {
@@ -91,7 +95,7 @@ public class TwoTupleVisualizer extends Visualizer {
         existingTuples = new HashSet<TwoByteTuple>();
         // data needs fixed for large file sizes
         byte[] data = cantordust.getMainInterface().getData();
-        int cachedSize = data.length / divisions;
+        int cachedSize = Math.max(1, data.length / divisions);
         for(int div = 0; div < divisions - 1; div++) {
             cachedFreqMaps.add(countedByteFrequencies(div*cachedSize, (div+1)*cachedSize));
         }
@@ -101,7 +105,7 @@ public class TwoTupleVisualizer extends Visualizer {
     private void gradientPlot(Graphics2D g, int low, int high) {
         cycles += 1;
         // data needs fixed for large file sizes
-        int cachedSize = this.cantordust.getMainInterface().getData().length / divisions;
+        int cachedSize = Math.max(1, this.cantordust.getMainInterface().getData().length / divisions);
         HashMap<TwoByteTuple, Integer> totalFreqs = new HashMap<>();
         HashMap<TwoByteTuple, Integer> leftStraggler = null;
         HashMap<TwoByteTuple, Integer> rightStraggler = null;
@@ -118,7 +122,10 @@ public class TwoTupleVisualizer extends Visualizer {
             }
         }
         for(int currentBlock = firstCacheBlockStart / cachedSize; currentBlock <= lastCacheBlockEnd / cachedSize; currentBlock++) {
-            mergeFreqCounts(cachedFreqMaps.get(currentBlock-1), totalFreqs);
+            int cacheIndex = currentBlock - 1;
+            if(cacheIndex >= 0 && cacheIndex < cachedFreqMaps.size()) {
+                mergeFreqCounts(cachedFreqMaps.get(cacheIndex), totalFreqs);
+            }
         }
 
         int colorStep = 5;
@@ -189,6 +196,16 @@ public class TwoTupleVisualizer extends Visualizer {
                 }
             }
         });
+        if(dataRangeSlider != null) {
+            dataRangeSlider.addChangeListener(new ChangeListener() {
+                public void stateChanged(ChangeEvent e) {
+                    if(!dataRangeSlider.getValueIsAdjusting()) {
+                        initializeCaches();
+                        constructImageAsync();
+                    }
+                }
+            });
+        }
     }
 
     private Color getColor(int freq, String rgbPosition) {
@@ -259,13 +276,50 @@ public class TwoTupleVisualizer extends Visualizer {
 
         this.addMouseListener(new MouseAdapter() {
             public void mouseReleased(MouseEvent e) {
-                if(e.getButton() == 3){
+                if(e.getButton() == MouseEvent.BUTTON1) {
+                    showCoordinatePopup(e);
+                } else if(e.getButton() == MouseEvent.BUTTON3){
                     popup.show(frame, TwoTupleVisualizer.this.getX() + e.getX(), TwoTupleVisualizer.this.getY() + e.getY());
                 }
             }
         });
 
         this.add(popup);
+    }
+
+    private void showCoordinatePopup(MouseEvent e) {
+        int x = (int)Math.floor((e.getX() * 256.0) / Math.max(1, getWidth()));
+        int y = (int)Math.floor((e.getY() * 256.0) / Math.max(1, getHeight()));
+        x = Math.max(0, Math.min(255, x));
+        y = Math.max(0, Math.min(255, y));
+
+        if(coordinatePopup != null) {
+            coordinatePopup.hide();
+            coordinatePopup = null;
+        }
+
+        JLabel label = new JLabel(String.format("(0x%02X, 0x%02X)", x, y));
+        JPanel panel = new JPanel();
+        panel.add(label);
+        if(mainInterface.theme == 1) {
+            panel.setBackground(Color.black);
+            label.setForeground(Color.white);
+        }
+
+        coordinatePopup = PopupFactory.getSharedInstance().getPopup(TwoTupleVisualizer.this, panel, e.getXOnScreen() + 8, e.getYOnScreen() + 8);
+        coordinatePopup.show();
+
+        Timer popupTimer = new Timer(1100, new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent event) {
+                if(coordinatePopup != null) {
+                    coordinatePopup.hide();
+                    coordinatePopup = null;
+                }
+            }
+        });
+        popupTimer.setRepeats(false);
+        popupTimer.start();
     }
 
 }

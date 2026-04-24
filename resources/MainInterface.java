@@ -22,6 +22,7 @@ import java.util.HashMap;
 public class MainInterface extends JPanel {
     private byte[] data;
     private byte[] fullData;
+    private static final int DATA_WINDOW_SIZE = 1048575;
     public BitMapSlider macroSlider;
     public BitMapSlider microSlider;
     public JSlider widthSlider;
@@ -86,9 +87,9 @@ public class MainInterface extends JPanel {
 
         if(fullData.length > 26214400){
             // 0xfffff = 1048575, 25MB = 0x1900000 = 26214400 bytes
-            this.data = Arrays.copyOfRange(fullData, 0, 1048575);
-            int range = fullData.length - 1048575;
-            dataSlider = new JSlider(1, range);
+            this.data = Arrays.copyOfRange(fullData, 0, DATA_WINDOW_SIZE);
+            int range = fullData.length - DATA_WINDOW_SIZE;
+            dataSlider = new JSlider(0, range);
             dataSlider.setOrientation(SwingConstants.VERTICAL);
             dataSlider.setInverted(true);
             dataSlider.setValue(0);
@@ -194,14 +195,7 @@ public class MainInterface extends JPanel {
         // Default Current Visualization: MetricMap
         currVis = new MetricMap(MetricMap.getWindowSize(), cantordust, this, frame, true);
         currVis.setPreferredSize(new Dimension(512, 512));
-        gbc.gridx = xOffset + 20;
-        gbc.gridy = 0;
-        gbc.gridheight = 512;
-        gbc.gridwidth = 512;
-        gbc.fill = GridBagConstraints.NONE;
-        gbc.anchor = GridBagConstraints.CENTER;
-        gbc.insets = new Insets(5, 5, 5, 5);
-        add(currVis, gbc);
+        add(currVis, buildVisualizerConstraints());
 
         // Setup buttons and button icons
         
@@ -306,19 +300,8 @@ public class MainInterface extends JPanel {
             dataSlider.addChangeListener(new ChangeListener() {
                 public void stateChanged(ChangeEvent e) {
                     JSlider slider = (JSlider)e.getSource();
-                    data = Arrays.copyOfRange(fullData, dataSlider.getValue(), dataSlider.getValue() + 1048575);
-    
-                    long minGhidraAddress1 = Long.parseLong(cantordust.getCurrentProgram().getMinAddress().toString(false), 16);
-                    // Update text for upper and lower value of microSlider
-                    long maxAddress1 = minGhidraAddress1 + dataSlider.getValue() + microSlider.getUpperValue();
-                    long minAddress1 = minGhidraAddress1 + dataSlider.getValue() + macroSlider.getValue() + microSlider.getValue() - 1;
-                    microValueHigh.setText(Long.toHexString(maxAddress1).toUpperCase());
-                    microValueLow.setText(Long.toHexString(minAddress1).toUpperCase());
-                    if(slider.getValueIsAdjusting()){
-                        macroSlider.updateData(data);
-                        microSlider.updateData(data);
-                        macroSlider.ui.makeBitmapAsync(0, data.length);
-                        microSlider.ui.makeBitmapAsync(macroSlider.getValue(), macroSlider.getUpperValue());
+                    if(!slider.getValueIsAdjusting()){
+                        updateDataWindow(slider.getValue());
                     }
                 }
             });
@@ -447,6 +430,44 @@ public class MainInterface extends JPanel {
         return this.frame;
     }
 
+    private void updateDataWindow(int requestedStart) {
+        int windowSize = Math.min(DATA_WINDOW_SIZE, fullData.length);
+        int maxStart = Math.max(0, fullData.length - windowSize);
+        int start = Math.max(0, Math.min(requestedStart, maxStart));
+        int end = Math.min(fullData.length, start + windowSize);
+
+        data = Arrays.copyOfRange(fullData, start, end);
+
+        long minGhidraAddress = Long.parseLong(cantordust.getCurrentProgram().getMinAddress().toString(false), 16);
+        long maxAddress = minGhidraAddress + start + microSlider.getUpperValue();
+        long minAddress = minGhidraAddress + start + macroSlider.getValue() + microSlider.getValue() - 1;
+        microValueHigh.setText(Long.toHexString(maxAddress).toUpperCase());
+        microValueLow.setText(Long.toHexString(minAddress).toUpperCase());
+
+        macroSlider.updateData(data);
+        microSlider.updateData(data);
+        if(macroSlider.ui != null) {
+            macroSlider.ui.makeBitmapAsync(0, data.length);
+        }
+        if(microSlider.ui != null) {
+            microSlider.ui.makeBitmapAsync(macroSlider.getValue(), macroSlider.getUpperValue());
+        }
+    }
+
+    private GridBagConstraints buildVisualizerConstraints() {
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.gridx = xOffset + 20;
+        gbc.gridy = 0;
+        gbc.gridheight = 512;
+        gbc.gridwidth = 512;
+        gbc.fill = GridBagConstraints.BOTH;
+        gbc.anchor = GridBagConstraints.CENTER;
+        gbc.insets = new Insets(5, 5, 5, 5);
+        gbc.weightx = 1.0;
+        gbc.weighty = 1.0;
+        return gbc;
+    }
+
     /**
      * Sets the current theme to dark
      */
@@ -532,15 +553,7 @@ public class MainInterface extends JPanel {
                     //currVis = new OneTupleVisualizer(OneTupleVisualizer.getWindowSize(), cantordust, frame);
                     currVis.setPreferredSize(new Dimension(512, 512));
                     currVis.setVisible(true);
-                    GridBagConstraints gbc = new GridBagConstraints();
-                    gbc.gridx = xOffset + 20;
-                    gbc.gridy = 0;
-                    gbc.gridheight = 512;
-                    gbc.gridwidth = 512;
-                    gbc.fill = GridBagConstraints.NONE;
-                    gbc.anchor = GridBagConstraints.CENTER;
-                    gbc.insets = new Insets(5, 5, 5, 5);
-                    add(currVis, gbc);
+                    add(currVis, buildVisualizerConstraints());
                     validate();
                 } else {
                     //JOptionPane.showMessageDialog(null, "test", "InfoBox: " + "test", JOptionPane.INFORMATION_MESSAGE);
@@ -575,15 +588,7 @@ public class MainInterface extends JPanel {
                     //currVis = new OneTupleVisualizer(OneTupleVisualizer.getWindowSize(), cantordust, frame);
                     currVis.setPreferredSize(new Dimension(512, 512));
                     currVis.setVisible(true);
-                    GridBagConstraints gbc = new GridBagConstraints();
-                    gbc.gridx = xOffset + 20;
-                    gbc.gridy = 0;
-                    gbc.gridheight = 512;
-                    gbc.gridwidth = 512;
-                    gbc.fill = GridBagConstraints.NONE;
-                    gbc.anchor = GridBagConstraints.CENTER;
-                    gbc.insets = new Insets(5, 5, 5, 5);
-                    add(currVis, gbc);
+                    add(currVis, buildVisualizerConstraints());
                     validate();
                 } else {
                     //JOptionPane.showMessageDialog(null, "test", "InfoBox: " + "test", JOptionPane.INFORMATION_MESSAGE);
@@ -618,15 +623,7 @@ public class MainInterface extends JPanel {
                     currVis = visualizerPanels.get(visualizerMapKeys.BITMAP);
                     currVis.setVisible(true);
                     currVis.setPreferredSize(new Dimension(512, 512));
-                    GridBagConstraints gbc = new GridBagConstraints();
-                    gbc.gridx = xOffset + 20;
-                    gbc.gridy = 0;
-                    gbc.gridheight = 512;
-                    gbc.gridwidth = 512;
-                    gbc.fill = GridBagConstraints.NONE;
-                    gbc.anchor = GridBagConstraints.CENTER;
-                    gbc.insets = new Insets(5, 5, 5, 5);
-                    add(currVis, gbc);
+                    add(currVis, buildVisualizerConstraints());
                     validate();
                 } else {
                     JFrame frame1 = new JFrame("Linear Bit Map");
@@ -659,15 +656,7 @@ public class MainInterface extends JPanel {
                     currVis = visualizerPanels.get(visualizerMapKeys.BYTECLOUD);
                     currVis.setVisible(true);
                     currVis.setPreferredSize(new Dimension(512, 512));
-                    GridBagConstraints gbc = new GridBagConstraints();
-                    gbc.gridx = xOffset + 20;
-                    gbc.gridy = 0;
-                    gbc.gridheight = 512;
-                    gbc.gridwidth = 512;
-                    gbc.fill = GridBagConstraints.NONE;
-                    gbc.anchor = GridBagConstraints.CENTER;
-                    gbc.insets = new Insets(5, 5, 5, 5);
-                    add(currVis, gbc);
+                    add(currVis, buildVisualizerConstraints());
                     validate();
                 } else {
                     JFrame frame1 = new JFrame("Byte Cloud Visualization");
@@ -699,15 +688,7 @@ public class MainInterface extends JPanel {
                     currVis = visualizerPanels.get(visualizerMapKeys.METRIC);
                     currVis.setPreferredSize(new Dimension(512, 512));
                     currVis.setVisible(true);
-                    GridBagConstraints gbc = new GridBagConstraints();
-                    gbc.gridx = xOffset + 20;
-                    gbc.gridy = 0;
-                    gbc.gridheight = 512;
-                    gbc.gridwidth = 512;
-                    gbc.fill = GridBagConstraints.NONE;
-                    gbc.anchor = GridBagConstraints.CENTER;
-                    gbc.insets = new Insets(5, 5, 5, 5);
-                    add(currVis, gbc) ;
+                    add(currVis, buildVisualizerConstraints()) ;
                     repaint();
                     validate();
                 } else {

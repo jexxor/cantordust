@@ -36,7 +36,8 @@ public class Cantordust extends GhidraSrc {
         this.mainInterface = new resources.MainInterface(getData(), this, frame);
         this.frame.getContentPane().add(mainInterface);
         this.frame.setSize(resources.MainInterface.getWindowWidth(), resources.MainInterface.getWindowHeight());
-        this.frame.setMinimumSize(new Dimension(resources.MainInterface.getWindowWidth(), resources.MainInterface.getWindowHeight()));
+        this.frame.setResizable(true);
+        this.frame.setMinimumSize(new Dimension(640, 480));
         this.frame.setVisible(true);
         this.frame.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
     }

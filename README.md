@@ -39,6 +39,17 @@ Take a look at [this blogpost](https://inside.battelle.org/blog-details/battelle
 4. Open up Ghidra and launch Cantordust as normal.
    - If you're having trouble, refer to *"Installation and Setup: Steps 4-5"* 
 
+## Fork changes
+
+This fork currently includes the following behavior changes:
+
+- Main Cantordust window is explicitly resizable and supports fullscreen better.
+- Main visualization area now scales with window size instead of staying fixed.
+- Metric Map now scales with the main window size, including click-to-address mapping.
+- Two Tuple view now shows a click popup with tuple coordinates in `(0xXX, 0xYY)` format.
+- Fixed fast-scroll stability issues that could throw exceptions and spike CPU usage by hardening slider bitmap rendering, Two Tuple cache bounds handling, and serializing Metric Map redraws to prevent concurrent `HashMap` corruption (`Node`/`TreeNode` class cast crash).
+- Fixed upper-thumb interaction in the relative (micro) range slider so it can be dragged reliably.
+
 ## Development Tips:
 
 Feel free to make modifications, changes and updates to this repository. Below are some tips on how to get started.
