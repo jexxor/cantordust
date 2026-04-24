@@ -528,7 +528,7 @@ public class MetricMap extends Visualizer{
     }
 
     private void draw() {
-        if(!isShowing() && mainInterface.currVis != this) {
+        if(!isShowing() && mainInterface.currVis != this && renderedImage != null) {
             return;
         }
         if(!csource.type.equals("classifierPrediction")) {

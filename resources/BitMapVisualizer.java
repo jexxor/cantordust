@@ -69,16 +69,12 @@ public class BitMapVisualizer extends Visualizer {
 
         dataWidthSlider.addChangeListener(new ChangeListener() {
             public void stateChanged(ChangeEvent e) {
-                if(!dataWidthSlider.getValueIsAdjusting()) {
-                    constructImageAsync();
-                }
+                constructImageAsync();
             }
         });
         dataOffsetSlider.addChangeListener(new ChangeListener() {
             public void stateChanged(ChangeEvent e) {
-                if(!dataOffsetSlider.getValueIsAdjusting()) {
-                    constructImageAsync();
-                }
+                constructImageAsync();
             }
         });
         dataWidthDownButton.addActionListener(new ActionListener() {
