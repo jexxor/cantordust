@@ -172,7 +172,8 @@ public class TwoTupleVisualizer extends Visualizer {
 
     private void gradientPlot(Graphics2D g, int low, int high) {
         cycles += 1;
-        if(mainInterface.isPlaybackActive()) {
+        boolean interactiveScrub = dataRangeSlider != null && dataRangeSlider.getValueIsAdjusting();
+        if(mainInterface.isPlaybackActive() || interactiveScrub) {
             int range = Math.max(1, high - low);
             int stride = Math.max(1, range / 131072);
             HashMap<TwoByteTuple, Integer> playbackFreqs = countedByteFrequencies(low, high, stride);
@@ -271,27 +272,21 @@ public class TwoTupleVisualizer extends Visualizer {
     private void addChangeListeners() {
         dataMacroSlider.addChangeListener(new ChangeListener() {
             public void stateChanged(ChangeEvent e) {
-                if(!dataMacroSlider.getValueIsAdjusting()) {
-                    constructImageAsync();
-                }
+                constructImageAsync();
             }
         });
         dataMicroSlider.addChangeListener(new ChangeListener() {
             public void stateChanged(ChangeEvent e) {
-                if(!dataMicroSlider.getValueIsAdjusting() && !dataMacroSlider.getValueIsAdjusting()) {
-                    constructImageAsync();
-                }
+                constructImageAsync();
             }
         });
         if(dataRangeSlider != null) {
             dataRangeSlider.addChangeListener(new ChangeListener() {
                 public void stateChanged(ChangeEvent e) {
-                    if(!dataRangeSlider.getValueIsAdjusting()) {
-                        if(!mainInterface.isPlaybackActive()) {
-                            initializeCaches();
-                        }
-                        constructImageAsync();
+                    if(!dataRangeSlider.getValueIsAdjusting() && !mainInterface.isPlaybackActive()) {
+                        initializeCaches();
                     }
+                    constructImageAsync();
                 }
             });
         }

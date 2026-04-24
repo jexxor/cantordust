@@ -226,8 +226,11 @@ class BitMapSliderUI extends RangeSliderUI {
      */
 
     public class BitMapTrackListener extends RangeSliderUI.RangeTrackListener {
+        private static final long WINDOW_SLIDE_EMIT_INTERVAL_MS = 33L;
         private boolean windowSliding;
         private double previousY;
+        private long lastWindowSlideEmitMs;
+        private int lastWindowSlideValue = Integer.MIN_VALUE;
 
         private boolean isBetweenThumbs(int x, int y) {
             if(thumbRect.contains(x, y) || upperThumbRect.contains(x, y)) {
@@ -241,13 +244,22 @@ class BitMapSliderUI extends RangeSliderUI {
         private void updateRectanglesForSlidingWindow(MouseEvent e) {
             if(windowSliding) {
                 double diff = previousY - e.getY();
+                double oldY = previousY;
+                previousY = e.getY();
                 int upperThumbRectNewY = (int)(upperThumbRect.getY() - diff);
                 int thumbRectNewY = (int)(thumbRect.getY() - diff);
-                if(upperThumbRectNewY < yPositionForValue(slider.getMaximum()) && thumbRectNewY > yPositionForValue(slider.getMinimum())) {
+                if(upperThumbRectNewY <= yPositionForValue(slider.getMaximum()) && thumbRectNewY >= yPositionForValue(slider.getMinimum())) {
                     upperThumbRect.setLocation((int)(upperThumbRect.getX()), upperThumbRectNewY);
                     thumbRect.setLocation((int)(thumbRect.getX()), thumbRectNewY);
-                    double oldY = previousY;
-                    previousY = e.getY();
+                    int thumbMiddle = thumbRectNewY + (thumbRect.height / 2);
+                    int newVal = valueForYPosition(thumbMiddle);
+                    long now = System.currentTimeMillis();
+                    if(newVal != lastWindowSlideValue && (now - lastWindowSlideEmitMs >= WINDOW_SLIDE_EMIT_INTERVAL_MS)) {
+                        ((BitMapSlider)slider).getModel().setRangeProperties(newVal, slider.getExtent(), slider.getMinimum(),
+                                slider.getMaximum(), true);
+                        lastWindowSlideValue = newVal;
+                        lastWindowSlideEmitMs = now;
+                    }
                     slider.repaint();
                     slider.setCursor(new Cursor(e.getY() > oldY ? Cursor.S_RESIZE_CURSOR: Cursor.N_RESIZE_CURSOR));
                 }
@@ -256,9 +268,9 @@ class BitMapSliderUI extends RangeSliderUI {
 
         private void updateValuesForSlidingWindow(MouseEvent e) {
             if(windowSliding) {
-                double newVal = valueForYPosition((int)(thumbRect.getY()));
-                //((BitMapSlider)slider).setValueWindowSlide((int)newVal);
-                ((BitMapSlider)slider).getModel().setRangeProperties((int)newVal, slider.getExtent(), slider.getMinimum(),
+                int thumbMiddle = (int)(thumbRect.getY() + (thumbRect.getHeight() / 2.0));
+                int newVal = valueForYPosition(thumbMiddle);
+                ((BitMapSlider)slider).getModel().setRangeProperties(newVal, slider.getExtent(), slider.getMinimum(),
                         slider.getMaximum(), slider.getValueIsAdjusting());
                 windowSliding = false;
             }
@@ -266,7 +278,10 @@ class BitMapSliderUI extends RangeSliderUI {
 
         @Override
         public void mouseDragged(MouseEvent e) {
-            updateRectanglesForSlidingWindow(e);
+            if(windowSliding) {
+                updateRectanglesForSlidingWindow(e);
+                return;
+            }
             super.mouseDragged(e);
         }
 
@@ -335,6 +350,11 @@ class BitMapSliderUI extends RangeSliderUI {
             if(isBetweenThumbs(x, y)) {
                 windowSliding = true;
                 previousY = y;
+                slider.setValueIsAdjusting(true);
+                lowerDragging = true;
+                upperDragging = false;
+                lastWindowSlideEmitMs = 0L;
+                lastWindowSlideValue = Integer.MIN_VALUE;
                 return;
             }
 

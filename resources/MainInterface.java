@@ -21,6 +21,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 
 public class MainInterface extends JPanel {
+    private static final int DATA_WINDOW_UPDATE_THROTTLE_MS = 33;
     private byte[] data;
     private byte[] fullData;
     private static final int DATA_WINDOW_SIZE = 1048575;
@@ -374,7 +375,7 @@ public class MainInterface extends JPanel {
             dataSlider.addChangeListener(new ChangeListener() {
                 public void stateChanged(ChangeEvent e) {
                     JSlider slider = (JSlider)e.getSource();
-                    if(!suppressDataSliderCallback && !slider.getValueIsAdjusting()){
+                    if(!suppressDataSliderCallback){
                         updateDataWindow(slider.getValue());
                     }
                 }
@@ -411,6 +412,11 @@ public class MainInterface extends JPanel {
                 }
                 microSlider.setUpperValue( (int)(highRatio * (nMax-nMin)) + nMin);
                 microSlider.setValue( (int)(lowRatio * (nMax-nMin)) + nMin);
+                if(microSlider.ui != null) {
+                    int bitmapLow = Math.max(0, slider.getValue() - 1);
+                    int bitmapHigh = Math.min(data.length, slider.getUpperValue());
+                    microSlider.ui.makeBitmapAsync(bitmapLow, bitmapHigh);
+                }
 
                 // Update text for upper and lower value of microSlider
                 if(dataSlider != null){
@@ -746,24 +752,34 @@ public class MainInterface extends JPanel {
     }
 
     private void drainPendingDataWindowUpdates() {
+        long lastApplyStartMs = 0L;
         while(true) {
+            long now = System.currentTimeMillis();
+            long waitMs = DATA_WINDOW_UPDATE_THROTTLE_MS - (now - lastApplyStartMs);
+            if(waitMs > 0L) {
+                try {
+                    Thread.sleep(waitMs);
+                } catch (InterruptedException interruptedException) {
+                    Thread.currentThread().interrupt();
+                    synchronized(dataWindowUpdateLock) {
+                        dataWindowUpdateInProgress = false;
+                    }
+                    return;
+                }
+            }
+
             int requestedStart;
             long requestId;
             synchronized(dataWindowUpdateLock) {
                 requestedStart = pendingDataWindowStart;
                 requestId = pendingDataWindowRequestId;
             }
+            lastApplyStartMs = System.currentTimeMillis();
 
             int start = clampDataWindowStart(requestedStart);
             int windowSize = Math.min(DATA_WINDOW_SIZE, fullData.length);
             int end = Math.min(fullData.length, start + windowSize);
             byte[] windowData = Arrays.copyOfRange(fullData, start, end);
-
-            synchronized(dataWindowUpdateLock) {
-                if(requestId != pendingDataWindowRequestId) {
-                    continue;
-                }
-            }
 
             final int applyStart = start;
             final byte[] applyData = windowData;

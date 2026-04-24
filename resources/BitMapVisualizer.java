@@ -54,16 +54,12 @@ public class BitMapVisualizer extends Visualizer {
 
         dataMacroSlider.addChangeListener(new ChangeListener() {
             public void stateChanged(ChangeEvent e) {
-                if(!dataMacroSlider.getValueIsAdjusting()) {
-                    constructImageAsync();
-                }
+                constructImageAsync();
             }
         });
         dataMicroSlider.addChangeListener(new ChangeListener() {
             public void stateChanged(ChangeEvent e) {
-                if(!dataMicroSlider.getValueIsAdjusting() && !dataMacroSlider.getValueIsAdjusting()) {
-                    constructImageAsync();
-                }
+                constructImageAsync();
             }
         });
 

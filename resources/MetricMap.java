@@ -72,27 +72,21 @@ public class MetricMap extends Visualizer{
         this.dataMicroSlider.addChangeListener(new ChangeListener() {
             @Override
             public void stateChanged(ChangeEvent changeEvent) {
-                if(!dataMicroSlider.getValueIsAdjusting() && !dataMacroSlider.getValueIsAdjusting()) {
-                    draw();
-                }
+                draw();
             }
         });
         this.dataMacroSlider.addChangeListener(new ChangeListener() {
             @Override
             public void stateChanged(ChangeEvent changeEvent) {
-                if(!dataMacroSlider.getValueIsAdjusting()) {
-                    draw();
-                }
+                draw();
             }
         });
         if(dataRangeSlider != null){
             this.dataRangeSlider.addChangeListener(new ChangeListener() {
                 @Override
                 public void stateChanged(ChangeEvent changeEvent) {
-                    if(!dataRangeSlider.getValueIsAdjusting()) {
-                        data = cantordust.getMainInterface().getData();
-                        draw();
-                    }
+                    data = cantordust.getMainInterface().getData();
+                    draw();
                 }
             });
         }

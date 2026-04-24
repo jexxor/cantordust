@@ -27,24 +27,18 @@ public abstract class Visualizer extends JPanel {
         setBackground(Color.black);
         dataMacroSlider.addChangeListener(new ChangeListener() {
             public void stateChanged(ChangeEvent e) {
-                if(!dataMacroSlider.getValueIsAdjusting()) {
-                    repaint();
-                }
+                repaint();
             }
         });
         dataMicroSlider.addChangeListener(new ChangeListener() {
             public void stateChanged(ChangeEvent e) {
-                if(!dataMicroSlider.getValueIsAdjusting()) {
-                    repaint();
-                }
+                repaint();
             }
         });
         if(dataRangeSlider != null){
             dataRangeSlider.addChangeListener(new ChangeListener() {
                 public void stateChanged(ChangeEvent e) {
-                    if(!dataRangeSlider.getValueIsAdjusting()) {
-                        repaint();
-                    }
+                    repaint();
                 }
             });
         }
@@ -60,24 +54,18 @@ public abstract class Visualizer extends JPanel {
         setBackground(Color.black);
         dataMacroSlider.addChangeListener(new ChangeListener() {
             public void stateChanged(ChangeEvent e) {
-                if(dataMacroSlider.getValueIsAdjusting()) {
-                    repaint();
-                }
+                repaint();
             }
         });
         dataMicroSlider.addChangeListener(new ChangeListener() {
             public void stateChanged(ChangeEvent e) {
-                if(dataMicroSlider.getValueIsAdjusting()) {
-                    repaint();
-                }
+                repaint();
             }
         });
         if(dataRangeSlider != null){
             dataRangeSlider.addChangeListener(new ChangeListener() {
                 public void stateChanged(ChangeEvent e) {
-                    if(!dataRangeSlider.getValueIsAdjusting()) {
-                        repaint();
-                    }
+                    repaint();
                 }
             });
         }
