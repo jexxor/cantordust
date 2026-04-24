@@ -16,8 +16,6 @@ Take a look at [this blogpost](https://inside.battelle.org/blog-details/battelle
 
 ## Fork changes
 
-[![Watch Demo]()](./preview/demo.mp4)
-
 This fork currently includes the following behavior changes:
 
 - Main Cantordust window is explicitly resizable and supports fullscreen better.
