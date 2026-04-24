@@ -1,5 +1,6 @@
 # Cantordust-Ghidra 
 
+
 ![CantorDust Bitmap Visualization](./resources/examplePic2Tuple/bitmap_2tup.png) 
 
 ![CantorDust Code Visualization](./resources/examplePic2Tuple/armv5l.png)
@@ -11,6 +12,24 @@ CantorDust (then ..cantor.dust..) was originally created by Chris Domas (xoreaxe
 Take a look at [this blogpost](https://inside.battelle.org/blog-details/battelle-publishes-open-source-binary-visualization-tool) to learn more about the algorithms and history behind this tool.
 
 **Cantordust is dependent on Ghidra version 9.1 or higher**
+
+## Fork changes
+
+This fork currently includes the following behavior changes:
+
+- Main Cantordust window is explicitly resizable and supports fullscreen better.
+- Main visualization area now scales with window size instead of staying fixed.
+- Metric Map now scales with the main window size, including click-to-address mapping.
+- Two Tuple view now shows a click popup with tuple coordinates in `(0xXX, 0xYY)` format.
+- Fixed fast-scroll stability issues that could throw exceptions and spike CPU usage by hardening slider bitmap rendering, Two Tuple cache bounds handling, and serializing Metric Map redraws to prevent concurrent `HashMap` corruption (`Node`/`TreeNode` class cast crash).
+- Fixed upper-thumb interaction in the relative (micro) range slider so it can be dragged reliably.
+- Added playback controls (`Play`, `Pause`, `Stop`, `Loop`, `Step`, and interval `ms`) with slider target selection (`Absolute`, `Macro`, `Micro`) so selected sliders can auto-run top-to-bottom.
+- Data-window updates now use a latest-wins queue, and bitmap/two-tuple/metric map renderers now coalesce background work so rapid playback drops stale frames instead of spawning unbounded render threads.
+- Playback performance was tuned for heavy workloads by reducing hidden-view redraw pressure, using faster bitmap scaling during playback, and using a reduced-cost Metric Map / sampled Two Tuple render path while playback is active.
+- Metric Map popup address/class lookup was fixed to align with the currently rendered zoomed state (including classifier mode), instead of stale/unzoomed coordinates.
+- Classifier prediction rendering now guards null/uninitialized classifier state and falls back safely instead of throwing runtime exceptions.
+- Horizontal width/offset sliders in the Linear Bitmap view now update interactively while dragging (not only on mouse release).
+- Metric Map initial render-on-open was fixed so first-time open reliably draws the map.
 
 ## Installation and Setup:
 
@@ -39,19 +58,6 @@ Take a look at [this blogpost](https://inside.battelle.org/blog-details/battelle
 4. Open up Ghidra and launch Cantordust as normal.
    - If you're having trouble, refer to *"Installation and Setup: Steps 4-5"* 
 
-## Fork changes
-
-This fork currently includes the following behavior changes:
-
-- Main Cantordust window is explicitly resizable and supports fullscreen better.
-- Main visualization area now scales with window size instead of staying fixed.
-- Metric Map now scales with the main window size, including click-to-address mapping.
-- Two Tuple view now shows a click popup with tuple coordinates in `(0xXX, 0xYY)` format.
-- Fixed fast-scroll stability issues that could throw exceptions and spike CPU usage by hardening slider bitmap rendering, Two Tuple cache bounds handling, and serializing Metric Map redraws to prevent concurrent `HashMap` corruption (`Node`/`TreeNode` class cast crash).
-- Fixed upper-thumb interaction in the relative (micro) range slider so it can be dragged reliably.
-- Added smooth data-window playback controls (`Play`, `Pause`, `Stop`, `Loop`, `Step`, and interval `ms`) for large files, with animation driving the large vertical data slider.
-- Data-window updates now use a latest-wins queue, and bitmap/two-tuple renderers now coalesce background work so rapid playback drops stale frames instead of spawning unbounded render threads.
-- Current playback scope is the large-file data window slider only; macro/micro auto-animation is intentionally left for a future iteration.
 
 ## Development Tips:
 

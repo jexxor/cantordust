@@ -279,6 +279,7 @@ public class MainInterface extends JPanel {
         twoTupleButton.setBackground(Color.darkGray);
         twoTupleButton.setToolTipText("Two Tuple");
         gbc.gridx = xOffset + 532;
+        gbc.gridy = 0;
         gbc.gridheight = 1;
         gbc.gridwidth = 1;
         add(twoTupleButton, gbc);
