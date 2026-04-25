@@ -1,89 +1,115 @@
-# Cantordust-Ghidra 
+# cantordust-ng (Ghidra)
 
+![cantordust-ng Bitmap Visualization](./resources/examplePic2Tuple/bitmap_2tup.png)
 
-![CantorDust Bitmap Visualization](./resources/examplePic2Tuple/bitmap_2tup.png) 
+![cantordust-ng Code Visualization](./resources/examplePic2Tuple/armv5l.png)
 
-![CantorDust Code Visualization](./resources/examplePic2Tuple/armv5l.png)
+`cantordust-ng` is a performance-focused continuation of the CantorDust Ghidra plugin, tuned for smooth interactive scrubbing/playback and robust large-binary workflows.
 
-CantorDust is a binary visulization tool used to aid reverse engineering efforts. It allows humans to utilize their superior visual pattern recognition to identify patterns in binary data.
+CantorDust (then `..cantor.dust..`) was originally created by Chris Domas (xoreaxeaxeax), with funding from Battelle. The Ghidra plugin version of CantorDust was primarily developed by Battelle interns AJ Snedden and Mike Sengelmann with funding from Battelle.
 
-CantorDust (then ..cantor.dust..) was originally created by Chris Domas (xoreaxeaxeax), with funding from Battelle. The Ghidra plugin version of CantorDust was primarily developed by Battelle interns AJ Snedden and Mike Sengelmann with funding from Battelle. 
+Background and history: [Battelle blog post](https://inside.battelle.org/blog-details/battelle-publishes-open-source-binary-visualization-tool)
 
-Take a look at [this blogpost](https://inside.battelle.org/blog-details/battelle-publishes-open-source-binary-visualization-tool) to learn more about the algorithms and history behind this tool.
+**Dependency:** Ghidra `9.1+`
 
-**Cantordust is dependent on Ghidra version 9.1 or higher**
-
-## Fork
-
-### Preview
+## Preview
 
 https://github.com/user-attachments/assets/19ff888f-957d-4b63-aad2-89ba43ee2ba7
 
-### Fork changelog
+## What's New in cantordust-ng
 
-See [CHANGELOG.md](CHANGELOG.md) for more details.
+The fork now includes all fixes and features tracked in [`CHANGELOG.md`](CHANGELOG.md). Highlights:
 
-## Installation and Setup:
+- Main window is explicitly resizable/fullscreen-friendly, and the main visualization area scales correctly with window size.
+- Metric Map scales with window resize (including click-to-address mapping), and Two Tuple shows coordinate popups as `(0xXX, 0xYY)`.
+- Fast-scroll stability was hardened (slider bitmap rendering, Two Tuple cache bounds, serialized Metric Map redraws) to prevent exceptions and concurrent map corruption.
+- Playback controls were added: `Play`, `Pause`, `Stop`, `Loop`, `Step`, `ms`, with selectable targets (`Absolute`, `Macro`, `Micro`).
+- Data-window updates use a latest-wins queue, and bitmap/two-tuple/metric-map renderers coalesce background work to avoid unbounded render thread buildup.
+- Playback responsiveness was tuned with hidden-view redraw suppression, render coalescing, and optimized update pipelines.
+- Metric Map popup address/classifier lookup now aligns with currently zoomed rendered state (including classifier mode), not stale coordinates.
+- Classifier rendering was hardened to tolerate null/uninitialized classifier state.
+- Linear Bitmap width/offset sliders update live during drag (not only on release).
+- Metric Map first-open render reliability was fixed.
+- Sequence guide path was added to Metric Map, with enable/disable and trail length controls.
+- ARGB1555 decoding in Metric Map was fixed (correct 5-bit scaling and bounds behavior).
+- 24bpp/32bpp decoding now uses unsigned channels and safe clamping.
+- 64bpp decoding was reworked for proper 16-bit downconversion and alpha-aware behavior.
+- Classifier wavelength conversion bug (green mask extraction) was fixed.
+- `ColorGradient` and `ColorClass` now use unsigned byte semantics (`0..255`), not signed Java byte behavior.
+- Entropy shading was hardened for short windows and removed expensive per-pixel debug logging.
+- Fragile string identity checks (`==`) were replaced with value checks (`equals`) for mode/type detection.
+- Per-frame `ColorSpectrum` recreation was removed; spectrum mapping is stable and no longer remapped each frame during scrubbing.
+- Noisy symbol-map debug logging was removed to avoid console I/O bottlenecks.
+- Remaining index safety gaps were fixed in `Color8bpp` and `ColorSpectrum`.
+- Classifier tail/partial block coverage was fixed; `classAtIndex` now uses explicit bounds clamping.
+- Entropy window math near EOF was fixed; probability normalization now uses actual sampled byte count.
+- Metric Map redraw coalescing now reuses one render executor instead of creating new threads per burst.
+- Metric Map square rendering now writes directly to 1D raster buffers and reuses sampled colors when possible.
+- Entropy internals now use fixed-size histograms instead of hash-map iteration in hot paths.
+- 8bpp/24bpp/32bpp color paths removed unnecessary `java.awt.Color` allocations.
+- Bitmap/TwoTuple/Slider/Data-window workers now use reusable single-thread executors to cut thread creation overhead.
+- Two Tuple now writes ARGB directly to image buffers (instead of per-pixel `Graphics2D` fill calls).
+- Spectrum and classifier coloring now use precomputed LUTs.
+- Bitmap entropy mode reuses a persistent entropy source object.
+- Two Tuple cache blocks moved from object-heavy tuple maps to dense `int[65536]` tables with touched-index reuse.
+- Bitmap rendering keeps full-resolution frame buffers and scales at paint time (removed expensive per-frame `getScaledInstance(...)`).
+- Metric Map drag responsiveness improved with more frequent stale-frame cancellation checks while preserving full-resolution rendering.
+- Initial window sizing now uses packed content dimensions and safer minimums, preventing first-launch clipping of left/right controls.
+- Metric Map playback now avoids rebuilding per-frame index hash maps and derives source offsets directly from map index math.
+- Metric Map now renders through packed ARGB/DataBuffer pipelines with reduced conversion overhead.
+- Playback path keeps full-resolution map rendering and skips guide-overlay regeneration during active playback for smoother animation.
+- Metric Map now caches full-resolution curve points (`index -> x,y`) and source-offset mappings to reduce repeated per-frame curve math/object churn.
+- Color sources now expose a direct ARGB fast path; Metric Map consumes it to avoid per-pixel `Rgb` allocation.
+- Entropy shading was rewritten with reusable histogram buffers (no per-pixel histogram allocations).
+- Runtime `Interpolation` toggle was added in Metric Map and Linear Bitmap popup menus.
+- Metric Map now supports drag selection (left-drag with threshold) and reports selected area size (`width x height`, cells, estimated bytes) via popup.
 
-1. Clone the repository from Github
+## Installation and Setup
 
-2. Install Ghidra **9.1** or higher (Cantordust requires this version or higher)
-      1. Download from: [https://ghidra-sre.org](https://ghidra-sre.org/)
-      2. Refer to the Ghidra Installation Guide: https://ghidra-sre.org/InstallationGuide.html
-3. Open Ghidra and start a new Project
-4. Map the Script Manager to your cantordust repo
-   1. Click the green play button in the task bar (script manager)
-   2. Click on the icon called "script directories" when hovered over
-   3. Click the green `+` (plus sign) and add the cantordust directory to the list
-5. Run Cantordust for testing
-   1. Filter the script manager for `Cantordust.java`. 
-   2. Highlight the file and click the green play button
+1. Clone this repository.
+2. Install Ghidra `9.1+`.
+   1. Download: [https://ghidra-sre.org](https://ghidra-sre.org/)
+   2. Install guide: https://ghidra-sre.org/InstallationGuide.html
+3. Open Ghidra and create/open a project.
+4. In Script Manager, add the local `cantordust-ng` directory as a script directory.
+5. Run `Cantordust.java` from Script Manager.
 
-> You can also assign a key binding to Cantordust.java by right clicking on the plugin.
+> You can also assign a key binding to `Cantordust.java`.
 
-## Updating Cantordust:
+## Updating
 
-1. Navigate to your `cantordust/` directory that stores this repository.
-2. run: `git pull`
-3. run: `python cleanup.py`
-   - If this doesn't work, refer to *"Development Tips:"*, section *"Ghidra Script Compilation"* for details on setup of your cleanup script.
-4. Open up Ghidra and launch Cantordust as normal.
-   - If you're having trouble, refer to *"Installation and Setup: Steps 4-5"* 
+1. Go to your local repository directory.
+2. Run `git pull`.
+3. Run `python cleanup.py`.
+4. Relaunch in Ghidra.
 
+If `cleanup.py` fails, see compilation notes below.
 
-## Development Tips:
+## Development Notes
 
-Feel free to make modifications, changes and updates to this repository. Below are some tips on how to get started.
+### Ghidra Script API
 
-#### Ghidra Script API
+In Ghidra, open `Help -> Ghidra API Help` for API docs.
 
-The Ghidra API is your friend. When in ghidra go to: "Help", and select "Ghidra API Help". This will take you to an interactive html page which provides everything you need to know in order to interact with the API.
-
-In order for Ghidra Scripts to work, the file that is run must extend GhidraScript like so:
+Ghidra scripts must extend `GhidraScript`:
 
 ```java
 import ghidra.app.script.GhidraScript;
 public class Cantordust extends GhidraScript { }
 ```
 
-This class `Cantordust` is the only class that can interact with the API.
+`Cantordust.java` is the entrypoint that can directly use Ghidra APIs and console output.
 
-> When adding a new `.java` file to the repo, make sure you pass `cantordust` to it as a parameter in it's initialization. The only way you can print when testing a ghidra script, is by calling the class that extends GhidraScript and then calling your print statement. This will print in the Ghidra console. Example Below:
+### Script Compilation / Class Refresh
 
-```java
-cantordust.printf("");
-```
+Ghidra scripts are not always recompiled automatically at runtime. To ensure code changes are picked up, remove stale generated `.class` files from your Ghidra scripts `bin` directory.
 
-#### Ghidra Script Compilation
+This repo includes `cleanup.py`, which reads `ghidra_bin_location.txt` and deletes generated classes.
 
-Ghidra Scripts are <u>**not**</u> automatically recompiled at runtime. This means that in order for you to make sure your live changes actually get applied at runtime, you need to delete the related `.class` files that Ghidra generates at compilation. Ghidra stores these class files in a directory labeled `bin` that is unique to every user, making it difficult to automate. We currently do this with a python script, `cleanup.py`, which looks for a file within the same directory called `ghidra_bin_location.txt`. Our python script expects the `txt` file to contain a utf-8 encoding of your specific bin location where the `.class` files are generated. The python script then will delete every `.class` file within the directory.  `ghidra_bin_location.txt` must exist and contain the ghidra bin folder location for it to work properly. 
-
-> **Update:** We have made advancements in automating this process, where `Cantordust.java` will actually locate the `bin` directory for you and write the location in a `ghidra_bin_location.txt` file for you at runtime. If this doesn't work on your operating system for whatever reason, the cleanup script will not work and you will have to create the `ghidra_bin_location.txt` file yourself.
-
-Here is an example file location on a linux system:
+Example Linux path:
 
 ```txt
 /home/user/.ghidra/.ghidra_9.1_PUBLIC/dev/ghidra_scripts/bin/
 ```
 
-> If you run into issues when running the script, this is probably because of the `UTF` encoding in your txt file. It should be `UTF-8`, but if you're having trouble figuring out how to force this you can edit the python script to decode `UTF-16` instead.
+If your environment writes the path file in a non-UTF-8 encoding, adjust decoding in `cleanup.py` accordingly.
