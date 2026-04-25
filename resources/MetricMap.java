@@ -12,7 +12,9 @@ import java.awt.Color;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ConcurrentHashMap;
@@ -24,6 +26,7 @@ public class MetricMap extends Visualizer{
     protected static int size_hilbert = 512;
     private static final long GUIDE_FOCUS_UPDATE_THROTTLE_MS = 16L;
     private static final int SELECTION_DRAG_THRESHOLD_PX = 6;
+    private static final int BOOKMARK_HIT_RADIUS_PX = 12;
     private static final byte[] EMPTY_BYTES = new byte[0];
     private byte[] reusableCurrentDataBuffer = new byte[0];
     protected int[][] pixelMap2D;
@@ -48,6 +51,12 @@ public class MetricMap extends Visualizer{
     private long lastGuideFocusUpdateMs = 0L;
     protected Popup popupAddr;
     private Popup popupSelection;
+    private final List<MetricBookmark> bookmarks = new ArrayList<>();
+    private int nextBookmarkId = 1;
+    private int bookmarkMenuViewX = -1;
+    private int bookmarkMenuViewY = -1;
+    private long bookmarkMenuMemoryOffset = -1L;
+    private MetricBookmark bookmarkMenuTarget;
     private boolean selectionDragActive = false;
     private int selectionStartViewX = -1;
     private int selectionStartViewY = -1;
@@ -57,6 +66,10 @@ public class MetricMap extends Visualizer{
     private boolean primaryPressActive = false;
     private int primaryPressViewX = -1;
     private int primaryPressViewY = -1;
+    private JMenuItem addBookmarkMenuItem;
+    private JMenuItem editBookmarkMenuItem;
+    private JMenuItem removeBookmarkMenuItem;
+    private JMenuItem clearBookmarksMenuItem;
     protected JPopupMenu popupMenu;
     protected Scurve map;
     protected JPanel panel = new JPanel();
@@ -131,6 +144,7 @@ public class MetricMap extends Visualizer{
         if(guidePathEnabled && renderedGuideOverlay != null) {
             g2.drawImage(renderedGuideOverlay, 0, 0, getWidth(), getHeight(), null);
         }
+        paintBookmarks(g2);
         if(selectionDragActive && selectionStartViewX >= 0 && selectionStartViewY >= 0
                 && selectionCurrentViewX >= 0 && selectionCurrentViewY >= 0) {
             int left = Math.min(selectionStartViewX, selectionCurrentViewX);
@@ -333,7 +347,7 @@ public class MetricMap extends Visualizer{
                 selectionArmed = false;
                 hideAddressPopup();
                 if(e.getButton() == 3){
-                    popupMenu.show(frame, MetricMap.this.getX() + e.getX(), MetricMap.this.getY() + e.getY());
+                    showPopupMenuAt(e);
                 }
             }
         });
@@ -372,6 +386,254 @@ public class MetricMap extends Visualizer{
 
     private boolean isSelectionGesture(MouseEvent e) {
         return (e.getModifiersEx() & InputEvent.SHIFT_DOWN_MASK) != 0;
+    }
+
+    private void showPopupMenuAt(MouseEvent e) {
+        bookmarkMenuViewX = clampViewX(e.getX());
+        bookmarkMenuViewY = clampViewY(e.getY());
+        bookmarkMenuMemoryOffset = getMemoryLocationAtView(bookmarkMenuViewX, bookmarkMenuViewY);
+        bookmarkMenuTarget = null;
+        if(bookmarkMenuMemoryOffset >= 0) {
+            bookmarkMenuTarget = findBookmarkByOffset(bookmarkMenuMemoryOffset);
+        }
+        if(bookmarkMenuTarget == null) {
+            bookmarkMenuTarget = findBookmarkNearView(bookmarkMenuViewX, bookmarkMenuViewY, BOOKMARK_HIT_RADIUS_PX);
+        }
+        refreshBookmarkMenuState();
+        popupMenu.show(MetricMap.this, e.getX(), e.getY());
+    }
+
+    private long getMemoryLocationAtView(int viewX, int viewY) {
+        Scurve lookupMap = renderLookupMap != null ? renderLookupMap : map;
+        if(lookupMap == null) {
+            return -1L;
+        }
+        int xPoint = scaleToMapX(viewX);
+        int yPoint = scaleToMapY(viewY);
+        int mapIndex;
+        try {
+            mapIndex = lookupMap.index(new TwoIntegerTuple(xPoint, yPoint));
+        } catch(RuntimeException ignored) {
+            return -1L;
+        }
+        int relativeLocation = mapIndexToRelativeLocation(mapIndex);
+        return (long)memLocBaseOffset + (long)relativeLocation;
+    }
+
+    private void refreshBookmarkMenuState() {
+        if(addBookmarkMenuItem == null) {
+            return;
+        }
+        boolean hasContext = bookmarkMenuMemoryOffset >= 0L;
+        boolean hasTarget = bookmarkMenuTarget != null;
+        addBookmarkMenuItem.setEnabled(hasContext);
+        editBookmarkMenuItem.setEnabled(hasTarget);
+        removeBookmarkMenuItem.setEnabled(hasTarget);
+        clearBookmarksMenuItem.setEnabled(!bookmarks.isEmpty());
+    }
+
+    private void addBookmarkAtMenuLocation() {
+        if(bookmarkMenuMemoryOffset < 0L) {
+            return;
+        }
+        String defaultLabel = "Bookmark " + nextBookmarkId;
+        String label = promptBookmarkLabel("Add Metric Map Bookmark", defaultLabel);
+        if(label == null) {
+            return;
+        }
+        MetricBookmark existingBookmark = findBookmarkByOffset(bookmarkMenuMemoryOffset);
+        if(existingBookmark != null) {
+            existingBookmark.label = label;
+            bookmarkMenuTarget = existingBookmark;
+        } else {
+            MetricBookmark bookmark = new MetricBookmark(bookmarkMenuMemoryOffset, label);
+            bookmarks.add(bookmark);
+            bookmarkMenuTarget = bookmark;
+            nextBookmarkId++;
+        }
+        repaint();
+    }
+
+    private void editBookmarkAtMenuLocation() {
+        MetricBookmark targetBookmark = bookmarkMenuTarget;
+        if(targetBookmark == null && bookmarkMenuMemoryOffset >= 0L) {
+            targetBookmark = findBookmarkByOffset(bookmarkMenuMemoryOffset);
+        }
+        if(targetBookmark == null) {
+            JOptionPane.showMessageDialog(
+                    this,
+                    "No bookmark found at this position.",
+                    "Metric Map Bookmarks",
+                    JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        String label = promptBookmarkLabel("Edit Metric Map Bookmark", targetBookmark.label);
+        if(label == null) {
+            return;
+        }
+        targetBookmark.label = label;
+        bookmarkMenuTarget = targetBookmark;
+        repaint();
+    }
+
+    private void removeBookmarkAtMenuLocation() {
+        MetricBookmark targetBookmark = bookmarkMenuTarget;
+        if(targetBookmark == null && bookmarkMenuMemoryOffset >= 0L) {
+            targetBookmark = findBookmarkByOffset(bookmarkMenuMemoryOffset);
+        }
+        if(targetBookmark == null) {
+            JOptionPane.showMessageDialog(
+                    this,
+                    "No bookmark found at this position.",
+                    "Metric Map Bookmarks",
+                    JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        bookmarks.remove(targetBookmark);
+        bookmarkMenuTarget = null;
+        repaint();
+    }
+
+    private void clearAllBookmarks() {
+        if(bookmarks.isEmpty()) {
+            return;
+        }
+        int choice = JOptionPane.showConfirmDialog(
+                this,
+                "Remove all metric-map bookmarks?",
+                "Metric Map Bookmarks",
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.WARNING_MESSAGE);
+        if(choice == JOptionPane.YES_OPTION) {
+            bookmarks.clear();
+            bookmarkMenuTarget = null;
+            repaint();
+        }
+    }
+
+    private String promptBookmarkLabel(String title, String initialLabel) {
+        String selectedLabel = (String) JOptionPane.showInputDialog(
+                this,
+                "Bookmark label:",
+                title,
+                JOptionPane.PLAIN_MESSAGE,
+                null,
+                null,
+                initialLabel);
+        if(selectedLabel == null) {
+            return null;
+        }
+        String normalized = selectedLabel.trim();
+        if(normalized.isEmpty()) {
+            return initialLabel;
+        }
+        return normalized;
+    }
+
+    private MetricBookmark findBookmarkByOffset(long memoryOffset) {
+        for(MetricBookmark bookmark : bookmarks) {
+            if(bookmark.memoryOffset == memoryOffset) {
+                return bookmark;
+            }
+        }
+        return null;
+    }
+
+    private MetricBookmark findBookmarkNearView(int viewX, int viewY, int maxDistancePx) {
+        Scurve lookupMap = renderLookupMap != null ? renderLookupMap : map;
+        if(lookupMap == null) {
+            return null;
+        }
+        int maxDistanceSquared = maxDistancePx * maxDistancePx;
+        MetricBookmark nearest = null;
+        int nearestDistance = Integer.MAX_VALUE;
+        for(MetricBookmark bookmark : bookmarks) {
+            BookmarkViewLocation location = mapBookmarkToView(bookmark, lookupMap);
+            if(location == null) {
+                continue;
+            }
+            int dx = location.viewX - viewX;
+            int dy = location.viewY - viewY;
+            int distanceSquared = dx * dx + dy * dy;
+            if(distanceSquared <= maxDistanceSquared && distanceSquared < nearestDistance) {
+                nearestDistance = distanceSquared;
+                nearest = bookmark;
+            }
+        }
+        return nearest;
+    }
+
+    private void paintBookmarks(Graphics2D g2) {
+        if(bookmarks.isEmpty()) {
+            return;
+        }
+        Scurve lookupMap = renderLookupMap != null ? renderLookupMap : map;
+        if(lookupMap == null) {
+            return;
+        }
+        for(MetricBookmark bookmark : bookmarks) {
+            BookmarkViewLocation location = mapBookmarkToView(bookmark, lookupMap);
+            if(location == null) {
+                continue;
+            }
+            boolean isTarget = bookmark == bookmarkMenuTarget;
+            int radius = isTarget ? 5 : 4;
+            g2.setColor(new Color(255, 210, 64, 230));
+            g2.fillOval(location.viewX - radius, location.viewY - radius, radius * 2 + 1, radius * 2 + 1);
+            g2.setColor(new Color(15, 15, 15, 220));
+            g2.drawOval(location.viewX - radius, location.viewY - radius, radius * 2 + 1, radius * 2 + 1);
+            if(bookmark.label != null && !bookmark.label.isEmpty()) {
+                java.awt.FontMetrics metrics = g2.getFontMetrics();
+                int textPadding = 3;
+                int textWidth = metrics.stringWidth(bookmark.label);
+                int boxWidth = textWidth + (textPadding * 2);
+                int boxHeight = metrics.getHeight() + 2;
+                int boxX = location.viewX + 8;
+                if(boxX + boxWidth >= getWidth()) {
+                    boxX = Math.max(0, location.viewX - boxWidth - 8);
+                }
+                int boxY = location.viewY - boxHeight - 6;
+                if(boxY < 0) {
+                    boxY = Math.min(Math.max(0, getHeight() - boxHeight), location.viewY + 6);
+                }
+                int baseline = boxY + metrics.getAscent() + 1;
+                g2.setColor(new Color(0, 0, 0, 160));
+                g2.fillRoundRect(boxX, boxY, boxWidth, boxHeight, 6, 6);
+                g2.setColor(new Color(255, 238, 170));
+                g2.drawString(bookmark.label, boxX + textPadding, baseline);
+            }
+        }
+    }
+
+    private BookmarkViewLocation mapBookmarkToView(MetricBookmark bookmark, Scurve lookupMap) {
+        if(bookmark == null || lookupMap == null) {
+            return null;
+        }
+        int sourceLength = Math.max(1, renderSourceLength);
+        long relativeOffset = bookmark.memoryOffset - (long)memLocBaseOffset;
+        if(relativeOffset < 0L || relativeOffset >= sourceLength) {
+            return null;
+        }
+        int mapLength = Math.max(1, renderMapLength);
+        int mapIndex = (int)((relativeOffset * (long)mapLength) / (long)sourceLength);
+        if(mapIndex >= mapLength) {
+            mapIndex = mapLength - 1;
+        }
+
+        Tuple point;
+        try {
+            point = lookupMap.point(mapIndex);
+        } catch(RuntimeException ignored) {
+            return null;
+        }
+        if(point == null) {
+            return null;
+        }
+        int mapWidth = Math.max(1, lookupMap.dimensions().get(0));
+        int mapHeight = Math.max(1, lookupMap.dimensions().get(1));
+        int viewX = (int)Math.floor(((point.get(0) + 0.5d) * Math.max(1, getWidth())) / (double)mapWidth);
+        int viewY = (int)Math.floor(((point.get(1) + 0.5d) * Math.max(1, getHeight())) / (double)mapHeight);
+        return new BookmarkViewLocation(clampViewX(viewX), clampViewY(viewY));
     }
 
     private boolean hasMovedEnoughForSelection(int viewX, int viewY) {
@@ -470,6 +732,26 @@ public class MetricMap extends Visualizer{
 
         resetSelection();
         repaint();
+    }
+
+    private static final class MetricBookmark {
+        private final long memoryOffset;
+        private String label;
+
+        private MetricBookmark(long memoryOffset, String label) {
+            this.memoryOffset = memoryOffset;
+            this.label = label;
+        }
+    }
+
+    private static final class BookmarkViewLocation {
+        private final int viewX;
+        private final int viewY;
+
+        private BookmarkViewLocation(int viewX, int viewY) {
+            this.viewX = viewX;
+            this.viewY = viewY;
+        }
     }
 
     private static class RenderDataWindow {
@@ -981,6 +1263,45 @@ public class MetricMap extends Visualizer{
         guideTrailMenu.add(guideTrailMedium);
         guideTrailMenu.add(guideTrailLong);
 
+        JMenu bookmarksMenu = new JMenu("Bookmarks");
+        addBookmarkMenuItem = new JMenuItem("Add Bookmark Here");
+        addBookmarkMenuItem.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                addBookmarkAtMenuLocation();
+            }
+        });
+
+        editBookmarkMenuItem = new JMenuItem("Edit Bookmark Here");
+        editBookmarkMenuItem.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                editBookmarkAtMenuLocation();
+            }
+        });
+
+        removeBookmarkMenuItem = new JMenuItem("Remove Bookmark Here");
+        removeBookmarkMenuItem.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                removeBookmarkAtMenuLocation();
+            }
+        });
+
+        clearBookmarksMenuItem = new JMenuItem("Clear All Bookmarks");
+        clearBookmarksMenuItem.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                clearAllBookmarks();
+            }
+        });
+
+        bookmarksMenu.add(addBookmarkMenuItem);
+        bookmarksMenu.add(editBookmarkMenuItem);
+        bookmarksMenu.add(removeBookmarkMenuItem);
+        bookmarksMenu.addSeparator();
+        bookmarksMenu.add(clearBookmarksMenuItem);
+
         JMenu locality = new JMenu("Locality");
         locality.add(hilbert);
         locality.add(linear);
@@ -1008,8 +1329,10 @@ public class MetricMap extends Visualizer{
         popupMenu.add(interpolationToggle);
         popupMenu.add(guidePath);
         popupMenu.add(guideTrailMenu);
+        popupMenu.add(bookmarksMenu);
         popupMenu.add(classGen);
         popupMenu.add(close);
+        refreshBookmarkMenuState();
         this.add(popupMenu);
     }
 

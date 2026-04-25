@@ -44,3 +44,4 @@
 - Color sources now expose a direct ARGB fast path; Metric Map consumes this path to avoid per-pixel `Rgb` object allocation, and entropy shading was rewritten to use reusable histograms instead of allocating per-pixel counting arrays.
 - Added runtime `Interpolation` toggle in Metric Map and Linear Bitmap popup menus for quick scaling-mode switching.
 - Added drag selection in Metric Map (`Shift+left-drag` with movement threshold), showing selected area size (`width x height` cells and estimated bytes) in a popup on release.
+- Added Metric Map bookmark support with right-click add/edit/remove/clear actions and visible bookmark markers/labels rendered on top of the map.
