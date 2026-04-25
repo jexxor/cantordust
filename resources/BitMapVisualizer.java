@@ -173,16 +173,6 @@ public class BitMapVisualizer extends Visualizer {
         });
         popup.add(interpolationToggle);
 
-        JCheckBoxMenuItem antiAliasingToggle = new JCheckBoxMenuItem("Anti-Aliasing", RenderSettings.isAntialiasingEnabled());
-        antiAliasingToggle.addActionListener(new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                RenderSettings.setAntialiasingEnabled(antiAliasingToggle.isSelected());
-                repaint();
-            }
-        });
-        popup.add(antiAliasingToggle);
-        
         this.addMouseListener(new MouseAdapter() {  
             public void mouseReleased(MouseEvent e) {  
                 if(e.getButton() == 3){

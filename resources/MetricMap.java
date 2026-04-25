@@ -23,6 +23,7 @@ public class MetricMap extends Visualizer{
     protected byte[] data;
     protected static int size_hilbert = 512;
     private static final long GUIDE_FOCUS_UPDATE_THROTTLE_MS = 16L;
+    private static final int SELECTION_DRAG_THRESHOLD_PX = 6;
     private static final byte[] EMPTY_BYTES = new byte[0];
     private byte[] reusableCurrentDataBuffer = new byte[0];
     protected int[][] pixelMap2D;
@@ -46,6 +47,15 @@ public class MetricMap extends Visualizer{
     private int lastGuideFocusRenderedIndex = -1;
     private long lastGuideFocusUpdateMs = 0L;
     protected Popup popupAddr;
+    private Popup popupSelection;
+    private boolean selectionDragActive = false;
+    private int selectionStartViewX = -1;
+    private int selectionStartViewY = -1;
+    private int selectionCurrentViewX = -1;
+    private int selectionCurrentViewY = -1;
+    private boolean primaryPressActive = false;
+    private int primaryPressViewX = -1;
+    private int primaryPressViewY = -1;
     protected JPopupMenu popupMenu;
     protected Scurve map;
     protected JPanel panel = new JPanel();
@@ -120,6 +130,17 @@ public class MetricMap extends Visualizer{
         if(guidePathEnabled && renderedGuideOverlay != null) {
             g2.drawImage(renderedGuideOverlay, 0, 0, getWidth(), getHeight(), null);
         }
+        if(selectionDragActive && selectionStartViewX >= 0 && selectionStartViewY >= 0
+                && selectionCurrentViewX >= 0 && selectionCurrentViewY >= 0) {
+            int left = Math.min(selectionStartViewX, selectionCurrentViewX);
+            int top = Math.min(selectionStartViewY, selectionCurrentViewY);
+            int width = Math.abs(selectionCurrentViewX - selectionStartViewX);
+            int height = Math.abs(selectionCurrentViewY - selectionStartViewY);
+            g2.setColor(new Color(80, 170, 255, 55));
+            g2.fillRect(left, top, width, height);
+            g2.setColor(new Color(80, 170, 255, 220));
+            g2.drawRect(left, top, Math.max(1, width), Math.max(1, height));
+        }
         g2.dispose();
     }
 
@@ -184,12 +205,19 @@ public class MetricMap extends Visualizer{
                 int b1 = MouseEvent.BUTTON1_DOWN_MASK;
                 int b2 = MouseEvent.BUTTON2_DOWN_MASK;
                 if ((e.getModifiersEx() & (b1 | b2)) == b1) {
+                    if(selectionDragActive) {
+                        updateSelection(e);
+                        return;
+                    }
+                    if(primaryPressActive && hasMovedEnoughForSelection(e.getX(), e.getY())) {
+                        beginSelection(primaryPressViewX, primaryPressViewY);
+                        updateSelection(e);
+                        return;
+                    }
                     if(guidePathEnabled) {
                         updateGuideFocusFromPointer(e, false);
                     }
-                    if(popupAddr != null) {
-                        popupAddr.hide();
-                    }
+                    hideAddressPopup();
                     if(e.getX() < getWidth() && e.getY() < getHeight()){
                         if(e.getX() >= 0 && e.getY() >= 0){
                             mousePressed(e);
@@ -219,6 +247,11 @@ public class MetricMap extends Visualizer{
                 int b1 = MouseEvent.BUTTON1_DOWN_MASK;
                 int b2 = MouseEvent.BUTTON2_DOWN_MASK;
                 if ((e.getModifiersEx() & (b1 | b2)) == b1) {
+                    if(e.getID() == MouseEvent.MOUSE_PRESSED) {
+                        primaryPressActive = true;
+                        primaryPressViewX = clampViewX(e.getX());
+                        primaryPressViewY = clampViewY(e.getY());
+                    }
                     JPanel bv = MetricMap.this;
                     JFrame metricMap = frame;
                     int x_point = scaleToMapX(e.getX());
@@ -277,9 +310,17 @@ public class MetricMap extends Visualizer{
             }
             @Override
             public void mouseReleased(MouseEvent e) {
-                if(popupAddr != null) {
-                    popupAddr.hide();
+                if(selectionDragActive) {
+                    completeSelection(e);
+                    primaryPressActive = false;
+                    primaryPressViewX = -1;
+                    primaryPressViewY = -1;
+                    return;
                 }
+                primaryPressActive = false;
+                primaryPressViewX = -1;
+                primaryPressViewY = -1;
+                hideAddressPopup();
                 if(e.getButton() == 3){
                     popupMenu.show(frame, MetricMap.this.getX() + e.getX(), MetricMap.this.getY() + e.getY());
                 }
@@ -308,6 +349,112 @@ public class MetricMap extends Visualizer{
             relativeLocation = sourceLength - 1;
         }
         return Math.max(0, relativeLocation);
+    }
+
+    private int clampViewX(int x) {
+        return Math.max(0, Math.min(Math.max(0, getWidth() - 1), x));
+    }
+
+    private int clampViewY(int y) {
+        return Math.max(0, Math.min(Math.max(0, getHeight() - 1), y));
+    }
+
+    private boolean hasMovedEnoughForSelection(int viewX, int viewY) {
+        if(!primaryPressActive) {
+            return false;
+        }
+        int dx = Math.abs(clampViewX(viewX) - primaryPressViewX);
+        int dy = Math.abs(clampViewY(viewY) - primaryPressViewY);
+        return Math.max(dx, dy) >= SELECTION_DRAG_THRESHOLD_PX;
+    }
+
+    private void hideAddressPopup() {
+        if(popupAddr != null) {
+            popupAddr.hide();
+            popupAddr = null;
+        }
+    }
+
+    private void hideSelectionPopup() {
+        if(popupSelection != null) {
+            popupSelection.hide();
+            popupSelection = null;
+        }
+    }
+
+    private void beginSelection(int startViewX, int startViewY) {
+        hideAddressPopup();
+        hideSelectionPopup();
+        selectionDragActive = true;
+        selectionStartViewX = clampViewX(startViewX);
+        selectionStartViewY = clampViewY(startViewY);
+        selectionCurrentViewX = selectionStartViewX;
+        selectionCurrentViewY = selectionStartViewY;
+        repaint();
+    }
+
+    private void updateSelection(MouseEvent e) {
+        if(!selectionDragActive) {
+            return;
+        }
+        selectionCurrentViewX = clampViewX(e.getX());
+        selectionCurrentViewY = clampViewY(e.getY());
+        repaint();
+    }
+
+    private void resetSelection() {
+        selectionDragActive = false;
+        selectionStartViewX = -1;
+        selectionStartViewY = -1;
+        selectionCurrentViewX = -1;
+        selectionCurrentViewY = -1;
+    }
+
+    private void completeSelection(MouseEvent e) {
+        if(!selectionDragActive) {
+            return;
+        }
+        updateSelection(e);
+
+        int left = Math.min(selectionStartViewX, selectionCurrentViewX);
+        int right = Math.max(selectionStartViewX, selectionCurrentViewX);
+        int top = Math.min(selectionStartViewY, selectionCurrentViewY);
+        int bottom = Math.max(selectionStartViewY, selectionCurrentViewY);
+
+        int minMapX = Math.min(scaleToMapX(left), scaleToMapX(right));
+        int maxMapX = Math.max(scaleToMapX(left), scaleToMapX(right));
+        int minMapY = Math.min(scaleToMapY(top), scaleToMapY(bottom));
+        int maxMapY = Math.max(scaleToMapY(top), scaleToMapY(bottom));
+
+        int mapWidth = Math.max(1, maxMapX - minMapX + 1);
+        int mapHeight = Math.max(1, maxMapY - minMapY + 1);
+        long selectedCells = (long)mapWidth * (long)mapHeight;
+        int sourceLength = Math.max(1, renderSourceLength);
+        int mapLength = Math.max(1, renderMapLength);
+        long estimatedBytes = Math.max(1L, Math.round((selectedCells * (double)sourceLength) / (double)mapLength));
+
+        JLabel label = new JLabel(String.format("Selection: %d x %d cells (%d), ~%d bytes", mapWidth, mapHeight, selectedCells, estimatedBytes));
+        JPanel panel = new JPanel();
+        if(mainInterface.theme == 1) {
+            panel.setBackground(Color.black);
+            label.setForeground(Color.white);
+        }
+        panel.add(label);
+        hideSelectionPopup();
+        popupSelection = PopupFactory.getSharedInstance().getPopup(this, panel, e.getXOnScreen() + 8, e.getYOnScreen() + 8);
+        popupSelection.show();
+
+        Timer popupTimer = new Timer(1800, new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent event) {
+                hideSelectionPopup();
+            }
+        });
+        popupTimer.setRepeats(false);
+        popupTimer.start();
+
+        resetSelection();
+        repaint();
     }
 
     private static class RenderDataWindow {
@@ -479,17 +626,14 @@ public class MetricMap extends Visualizer{
         int start = Math.max(0, focus - halfTrail);
         int end = Math.min(length - 1, focus + halfTrail);
 
-        String cacheKey = activeMap.type + ":" + width + "x" + height + ":" + start + ":" + end + ":" + focus + ":" + guideTrailLength
-                + ":" + (RenderSettings.isAntialiasingEnabled() ? "aa1" : "aa0");
+        String cacheKey = activeMap.type + ":" + width + "x" + height + ":" + start + ":" + end + ":" + focus + ":" + guideTrailLength;
         if(cachedGuideOverlay != null && cacheKey.equals(cachedGuideOverlayKey)) {
             return cachedGuideOverlay;
         }
 
         BufferedImage overlay = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
         Graphics2D guideGraphics = overlay.createGraphics();
-        guideGraphics.setRenderingHint(
-                RenderingHints.KEY_ANTIALIASING,
-                RenderSettings.isAntialiasingEnabled() ? RenderingHints.VALUE_ANTIALIAS_ON : RenderingHints.VALUE_ANTIALIAS_OFF);
+        guideGraphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         guideGraphics.setStroke(new BasicStroke(1.35f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
 
         TwoIntegerTuple previousPoint = (TwoIntegerTuple)activeMap.point(start);
@@ -801,19 +945,6 @@ public class MetricMap extends Visualizer{
             }
         });
 
-        JCheckBoxMenuItem antiAliasingToggle = new JCheckBoxMenuItem("Anti-Aliasing", RenderSettings.isAntialiasingEnabled());
-        antiAliasingToggle.addActionListener(new ActionListener() {
-            public void actionPerformed(ActionEvent e) {
-                RenderSettings.setAntialiasingEnabled(antiAliasingToggle.isSelected());
-                cachedGuideOverlayKey = null;
-                if(guidePathEnabled) {
-                    draw();
-                } else {
-                    repaint();
-                }
-            }
-        });
-
         JMenu guideTrailMenu = new JMenu("Guide Trail Length");
         ButtonGroup guideTrailGroup = new ButtonGroup();
         JRadioButtonMenuItem guideTrailMedium = new JRadioButtonMenuItem("Medium (1536)", true);
@@ -860,7 +991,6 @@ public class MetricMap extends Visualizer{
         popupMenu.add(locality);
         popupMenu.add(shading);
         popupMenu.add(interpolationToggle);
-        popupMenu.add(antiAliasingToggle);
         popupMenu.add(guidePath);
         popupMenu.add(guideTrailMenu);
         popupMenu.add(classGen);

@@ -42,4 +42,5 @@
 - Playback path keeps full-resolution map rendering and skips guide-overlay regeneration while playback is active to prioritize animation smoothness.
 - Metric Map now caches full-resolution curve point coordinates (`index -> x,y`) and source-offset mappings, removing repeated per-frame curve-point object creation and floating-point remap overhead.
 - Color sources now expose a direct ARGB fast path; Metric Map consumes this path to avoid per-pixel `Rgb` object allocation, and entropy shading was rewritten to use reusable histograms instead of allocating per-pixel counting arrays.
-- Added runtime `Interpolation` and `Anti-Aliasing` toggles in Metric Map and Linear Bitmap popup menus so users can independently control scaling smoothness and edge smoothing.
+- Added runtime `Interpolation` toggle in Metric Map and Linear Bitmap popup menus for quick scaling-mode switching.
+- Added drag selection in Metric Map (left-drag with movement threshold), showing selected area size (`width x height` cells and estimated bytes) in a popup on release.
