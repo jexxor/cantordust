@@ -15,6 +15,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import javax.swing.JButton;
+import javax.swing.JCheckBoxMenuItem;
 import javax.swing.JFrame;
 import javax.swing.JMenuItem;
 import javax.swing.JPopupMenu;
@@ -161,6 +162,26 @@ public class BitMapVisualizer extends Visualizer {
             }
         });
         popup.add(entropy);
+
+        JCheckBoxMenuItem interpolationToggle = new JCheckBoxMenuItem("Interpolation", RenderSettings.isInterpolationEnabled());
+        interpolationToggle.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                RenderSettings.setInterpolationEnabled(interpolationToggle.isSelected());
+                repaint();
+            }
+        });
+        popup.add(interpolationToggle);
+
+        JCheckBoxMenuItem antiAliasingToggle = new JCheckBoxMenuItem("Anti-Aliasing", RenderSettings.isAntialiasingEnabled());
+        antiAliasingToggle.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                RenderSettings.setAntialiasingEnabled(antiAliasingToggle.isSelected());
+                repaint();
+            }
+        });
+        popup.add(antiAliasingToggle);
         
         this.addMouseListener(new MouseAdapter() {  
             public void mouseReleased(MouseEvent e) {  
@@ -179,8 +200,7 @@ public class BitMapVisualizer extends Visualizer {
 
         if(img != null) {
             Graphics2D g2 = (Graphics2D) g.create();
-            g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
-            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF);
+            RenderSettings.applyImageRenderingHints(g2);
             g2.drawImage(img, 0, 0, Math.max(1, getWidth()), Math.max(1, getHeight()), this);
             g2.dispose();
         }

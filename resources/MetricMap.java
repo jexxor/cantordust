@@ -114,9 +114,7 @@ public class MetricMap extends Visualizer{
         super.paintComponent(g);
         Graphics2D g2 = (Graphics2D) g.create();
         if(renderedImage != null) {
-            // Keep byte blocks visually discrete when scaling.
-            g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
-            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF);
+            RenderSettings.applyImageRenderingHints(g2);
             g2.drawImage(renderedImage, 0, 0, getWidth(), getHeight(), null);
         }
         if(guidePathEnabled && renderedGuideOverlay != null) {
@@ -481,14 +479,17 @@ public class MetricMap extends Visualizer{
         int start = Math.max(0, focus - halfTrail);
         int end = Math.min(length - 1, focus + halfTrail);
 
-        String cacheKey = activeMap.type + ":" + width + "x" + height + ":" + start + ":" + end + ":" + focus + ":" + guideTrailLength;
+        String cacheKey = activeMap.type + ":" + width + "x" + height + ":" + start + ":" + end + ":" + focus + ":" + guideTrailLength
+                + ":" + (RenderSettings.isAntialiasingEnabled() ? "aa1" : "aa0");
         if(cachedGuideOverlay != null && cacheKey.equals(cachedGuideOverlayKey)) {
             return cachedGuideOverlay;
         }
 
         BufferedImage overlay = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
         Graphics2D guideGraphics = overlay.createGraphics();
-        guideGraphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        guideGraphics.setRenderingHint(
+                RenderingHints.KEY_ANTIALIASING,
+                RenderSettings.isAntialiasingEnabled() ? RenderingHints.VALUE_ANTIALIAS_ON : RenderingHints.VALUE_ANTIALIAS_OFF);
         guideGraphics.setStroke(new BasicStroke(1.35f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
 
         TwoIntegerTuple previousPoint = (TwoIntegerTuple)activeMap.point(start);
@@ -792,6 +793,27 @@ public class MetricMap extends Visualizer{
             }
         });
 
+        JCheckBoxMenuItem interpolationToggle = new JCheckBoxMenuItem("Interpolation", RenderSettings.isInterpolationEnabled());
+        interpolationToggle.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent e) {
+                RenderSettings.setInterpolationEnabled(interpolationToggle.isSelected());
+                repaint();
+            }
+        });
+
+        JCheckBoxMenuItem antiAliasingToggle = new JCheckBoxMenuItem("Anti-Aliasing", RenderSettings.isAntialiasingEnabled());
+        antiAliasingToggle.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent e) {
+                RenderSettings.setAntialiasingEnabled(antiAliasingToggle.isSelected());
+                cachedGuideOverlayKey = null;
+                if(guidePathEnabled) {
+                    draw();
+                } else {
+                    repaint();
+                }
+            }
+        });
+
         JMenu guideTrailMenu = new JMenu("Guide Trail Length");
         ButtonGroup guideTrailGroup = new ButtonGroup();
         JRadioButtonMenuItem guideTrailMedium = new JRadioButtonMenuItem("Medium (1536)", true);
@@ -837,6 +859,8 @@ public class MetricMap extends Visualizer{
         popupMenu.add(pause);
         popupMenu.add(locality);
         popupMenu.add(shading);
+        popupMenu.add(interpolationToggle);
+        popupMenu.add(antiAliasingToggle);
         popupMenu.add(guidePath);
         popupMenu.add(guideTrailMenu);
         popupMenu.add(classGen);
