@@ -8,23 +8,35 @@ import javax.swing.event.ChangeListener;
 import java.awt.event.*;
 import java.util.HashMap;
 import java.awt.image.*;
+import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
 
 public class MetricMap extends Visualizer{
     protected byte[] data;
     protected static int size_hilbert = 512;
     private static final int PLAYBACK_RENDER_SIZE = 256;
+    private static final long GUIDE_FOCUS_UPDATE_THROTTLE_MS = 16L;
     protected int[][] pixelMap2D;
     protected int[] pixelMap1D;
     protected HashMap<Integer, Integer> memLoc = new HashMap<Integer, Integer>();
     private volatile int memLocBaseOffset = 0;
     private volatile Scurve renderLookupMap;
     private volatile BufferedImage renderedImage;
+    private volatile BufferedImage renderedGuideOverlay;
     private Scurve playbackHilbertMap;
     private Scurve playbackZorderMap;
     private Scurve playbackHcurveMap;
     private Linear playbackLinearMap;
+    private BufferedImage cachedGuideOverlay;
+    private String cachedGuideOverlayKey;
+    private boolean guidePathEnabled = false;
+    private int guideTrailLength = 1536;
+    private int guideFocusIndex = -1;
+    private int lastGuideFocusRenderedIndex = -1;
+    private long lastGuideFocusUpdateMs = 0L;
     protected Popup popupAddr;
     protected JPopupMenu popupMenu;
     protected Scurve map;
@@ -69,6 +81,9 @@ public class MetricMap extends Visualizer{
         super.paintComponent(g);
         if(renderedImage != null) {
             g.drawImage(renderedImage, 0, 0, getWidth(), getHeight(), null);
+        }
+        if(guidePathEnabled && renderedGuideOverlay != null) {
+            g.drawImage(renderedGuideOverlay, 0, 0, getWidth(), getHeight(), null);
         }
     }
 
@@ -133,6 +148,9 @@ public class MetricMap extends Visualizer{
                 int b1 = MouseEvent.BUTTON1_DOWN_MASK;
                 int b2 = MouseEvent.BUTTON2_DOWN_MASK;
                 if ((e.getModifiersEx() & (b1 | b2)) == b1) {
+                    if(guidePathEnabled) {
+                        updateGuideFocusFromPointer(e, false);
+                    }
                     if(popupAddr != null) {
                         popupAddr.hide();
                     }
@@ -143,6 +161,14 @@ public class MetricMap extends Visualizer{
                     }
                 }
             }
+
+            @Override
+            public void mouseMoved(MouseEvent e) {
+                if(guidePathEnabled) {
+                    updateGuideFocusFromPointer(e, false);
+                }
+            }
+
             @Override
             public void mousePressed(MouseEvent e) {
                 MouseListener[] mA = getMouseListeners();
@@ -173,6 +199,7 @@ public class MetricMap extends Visualizer{
                         return;
                     }
                     int loc = lookupMap.index(p);
+                    updateGuideFocus(lookupMap, loc, e.getID() == MouseEvent.MOUSE_PRESSED);
                     HashMap<Integer, Integer> memLocSnapshot = memLoc;
                     Integer relativeLocation = memLocSnapshot.get(loc);
                     if(relativeLocation == null) {
@@ -304,6 +331,133 @@ public class MetricMap extends Visualizer{
         }
 
         return activeMap;
+    }
+
+    private boolean updateGuideFocusFromPointer(MouseEvent e, boolean forceUpdate) {
+        if(e.getX() < 0 || e.getY() < 0 || e.getX() >= getWidth() || e.getY() >= getHeight()) {
+            return false;
+        }
+        Scurve lookupMap = renderLookupMap != null ? renderLookupMap : map;
+        if(lookupMap == null) {
+            return false;
+        }
+        TwoIntegerTuple p = new TwoIntegerTuple(scaleToMapX(e.getX()), scaleToMapY(e.getY()));
+        int loc = lookupMap.index(p);
+        updateGuideFocus(lookupMap, loc, forceUpdate);
+        return true;
+    }
+
+    private BufferedImage getGuideOverlayForMap(Scurve activeMap) {
+        if(!guidePathEnabled || activeMap == null) {
+            return null;
+        }
+
+        int length = activeMap.getLength();
+        if(length < 2) {
+            return null;
+        }
+        TwoIntegerTuple dimensions = activeMap.dimensions();
+        int width = dimensions.get(0);
+        int height = dimensions.get(1);
+
+        int focus = guideFocusIndex >= 0 ? guideFocusIndex : (length / 2);
+        focus = Math.max(0, Math.min(length - 1, focus));
+        int halfTrail = Math.max(16, guideTrailLength / 2);
+        int start = Math.max(0, focus - halfTrail);
+        int end = Math.min(length - 1, focus + halfTrail);
+
+        String cacheKey = activeMap.type + ":" + width + "x" + height + ":" + start + ":" + end + ":" + focus + ":" + guideTrailLength;
+        if(cachedGuideOverlay != null && cacheKey.equals(cachedGuideOverlayKey)) {
+            return cachedGuideOverlay;
+        }
+
+        BufferedImage overlay = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D guideGraphics = overlay.createGraphics();
+        guideGraphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        guideGraphics.setStroke(new BasicStroke(1.35f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+
+        TwoIntegerTuple previousPoint = (TwoIntegerTuple)activeMap.point(start);
+        for(int idx = start + 1; idx <= end; idx++) {
+            TwoIntegerTuple currentPoint = (TwoIntegerTuple)activeMap.point(idx);
+            float progress = (idx - start) / (float)Math.max(1, end - start);
+            int red = (int)(40 + (215 * progress));
+            int green = (int)(220 - (160 * progress));
+            int blue = (int)(255 - (140 * progress));
+            int alpha = (int)(70 + (130 * progress));
+            guideGraphics.setColor(new Color(red, green, blue, alpha));
+            guideGraphics.drawLine(previousPoint.get(0), previousPoint.get(1), currentPoint.get(0), currentPoint.get(1));
+            previousPoint = currentPoint;
+        }
+
+        TwoIntegerTuple startPoint = (TwoIntegerTuple)activeMap.point(start);
+        TwoIntegerTuple endPoint = (TwoIntegerTuple)activeMap.point(end);
+        TwoIntegerTuple focusPoint = (TwoIntegerTuple)activeMap.point(focus);
+        guideGraphics.setColor(new Color(0, 220, 255, 190));
+        guideGraphics.fillOval(startPoint.get(0) - 2, startPoint.get(1) - 2, 5, 5);
+        guideGraphics.setColor(new Color(255, 64, 64, 210));
+        guideGraphics.fillOval(endPoint.get(0) - 2, endPoint.get(1) - 2, 5, 5);
+        guideGraphics.setColor(new Color(255, 210, 0, 230));
+        guideGraphics.fillOval(focusPoint.get(0) - 3, focusPoint.get(1) - 3, 7, 7);
+        guideGraphics.dispose();
+
+        cachedGuideOverlay = overlay;
+        cachedGuideOverlayKey = cacheKey;
+        return overlay;
+    }
+
+    private void setGuideTrailLength(int nextLength) {
+        guideTrailLength = Math.max(64, nextLength);
+        cachedGuideOverlayKey = null;
+        if(guidePathEnabled) {
+            draw();
+        }
+    }
+
+    private void updateGuideFocus(Scurve lookupMap, int loc, boolean forceUpdate) {
+        if(!guidePathEnabled || lookupMap == null) {
+            return;
+        }
+        int length = lookupMap.getLength();
+        if(length <= 0) {
+            return;
+        }
+        int clampedLoc = Math.max(0, Math.min(length - 1, loc));
+        if(!forceUpdate) {
+            if(clampedLoc == lastGuideFocusRenderedIndex) {
+                return;
+            }
+            long now = System.currentTimeMillis();
+            if(now - lastGuideFocusUpdateMs < GUIDE_FOCUS_UPDATE_THROTTLE_MS) {
+                return;
+            }
+            lastGuideFocusUpdateMs = now;
+        } else {
+            lastGuideFocusUpdateMs = System.currentTimeMillis();
+        }
+
+        guideFocusIndex = clampedLoc;
+        lastGuideFocusRenderedIndex = clampedLoc;
+        refreshGuideOverlayOnly();
+    }
+
+    private void refreshGuideOverlayOnly() {
+        if(!guidePathEnabled) {
+            return;
+        }
+        Scurve activeMap = renderLookupMap != null ? renderLookupMap : map;
+        if(activeMap == null) {
+            return;
+        }
+        BufferedImage overlay = getGuideOverlayForMap(activeMap);
+        if(SwingUtilities.isEventDispatchThread()) {
+            renderedGuideOverlay = overlay;
+            repaint();
+        } else {
+            SwingUtilities.invokeLater(() -> {
+                renderedGuideOverlay = overlay;
+                repaint();
+            });
+        }
     }
 
     public void createPopupMenu(JFrame frame){
@@ -507,6 +661,43 @@ public class MetricMap extends Visualizer{
             }
         });
 
+        JCheckBoxMenuItem guidePath = new JCheckBoxMenuItem("Sequence Guide");
+        guidePath.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent e) {
+                guidePathEnabled = guidePath.isSelected();
+                cachedGuideOverlayKey = null;
+                lastGuideFocusRenderedIndex = -1;
+                lastGuideFocusUpdateMs = 0L;
+                if(guidePathEnabled) {
+                    draw();
+                } else {
+                    renderedGuideOverlay = null;
+                    repaint();
+                }
+            }
+        });
+
+        JMenu guideTrailMenu = new JMenu("Guide Trail Length");
+        ButtonGroup guideTrailGroup = new ButtonGroup();
+        JRadioButtonMenuItem guideTrailMedium = new JRadioButtonMenuItem("Medium (1536)", true);
+        JRadioButtonMenuItem guideTrailLong = new JRadioButtonMenuItem("Long (6144)");
+
+        guideTrailMedium.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent e) {
+                setGuideTrailLength(1536);
+            }
+        });
+        guideTrailLong.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent e) {
+                setGuideTrailLength(6144);
+            }
+        });
+
+        guideTrailGroup.add(guideTrailMedium);
+        guideTrailGroup.add(guideTrailLong);
+        guideTrailMenu.add(guideTrailMedium);
+        guideTrailMenu.add(guideTrailLong);
+
         JMenu locality = new JMenu("Locality");
         locality.add(hilbert);
         locality.add(linear);
@@ -531,6 +722,8 @@ public class MetricMap extends Visualizer{
         popupMenu.add(pause);
         popupMenu.add(locality);
         popupMenu.add(shading);
+        popupMenu.add(guidePath);
+        popupMenu.add(guideTrailMenu);
         popupMenu.add(classGen);
         popupMenu.add(close);
         this.add(popupMenu);
@@ -612,6 +805,7 @@ public class MetricMap extends Visualizer{
         int height = dimensions.get(1);
         int[][] nextPixelMap2D = new int[height][width*3];
         HashMap<Integer, Integer> nextMemLoc = new HashMap<Integer, Integer>();
+        BufferedImage guideOverlay = getGuideOverlayForMap(activeMap);
 
         float step = (float)activeSource.getLength()/(float)(activeMap.getLength());
         for(int i=0; i<activeMap.getLength(); i++){
@@ -623,7 +817,7 @@ public class MetricMap extends Visualizer{
 
         int[] nextPixelMap1D = convertPixelMapTo1D(nextPixelMap2D);
         //c.save(name);
-        plotMap(dimensions, nextPixelMap1D, nextMemLoc, dataBaseOffset, activeMap);
+        plotMap(dimensions, nextPixelMap1D, nextMemLoc, dataBaseOffset, activeMap, guideOverlay);
     }
 
     public void drawMap_unrolled(String map_type, int size, ColorSource csource/*, String name, prog */) {
@@ -718,10 +912,10 @@ public class MetricMap extends Visualizer{
         // panel.add( createImageLabel(this.pixelMap1D, width, height) );
         // panel.revalidate();
         // panel.repaint();
-        plotMap(dimensions, this.pixelMap1D, this.memLoc, this.memLocBaseOffset, this.renderLookupMap);
+        plotMap(dimensions, this.pixelMap1D, this.memLoc, this.memLocBaseOffset, this.renderLookupMap, this.renderedGuideOverlay);
     }
 
-    private void plotMap(TwoIntegerTuple dimensions, int[] pixels, HashMap<Integer, Integer> nextMemLoc, int nextBaseOffset, Scurve nextLookupMap){
+    private void plotMap(TwoIntegerTuple dimensions, int[] pixels, HashMap<Integer, Integer> nextMemLoc, int nextBaseOffset, Scurve nextLookupMap, BufferedImage nextGuideOverlay){
         int width = dimensions.get(0);
         int height = dimensions.get(1);
         BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
@@ -733,6 +927,7 @@ public class MetricMap extends Visualizer{
             this.memLoc = nextMemLoc;
             this.renderLookupMap = nextLookupMap;
             this.renderedImage = image;
+            this.renderedGuideOverlay = nextGuideOverlay;
             repaint();
         });
     }

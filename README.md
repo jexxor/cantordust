@@ -36,6 +36,7 @@ This fork currently includes the following behavior changes:
 - Classifier prediction rendering now guards null/uninitialized classifier state and falls back safely instead of throwing runtime exceptions.
 - Horizontal width/offset sliders in the Linear Bitmap view now update interactively while dragging (not only on mouse release).
 - Metric Map initial render-on-open was fixed so first-time open reliably draws the map.
+- Added a sequence guide path to the Metric Map, which can be enabled/disabled with the `Sequence Guide` checkbox in the Metric Map popup menu.
 
 ## Installation and Setup:
 
