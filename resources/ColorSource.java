@@ -1,7 +1,6 @@
 package resources;
 
 import java.util.HashMap;
-import java.util.TreeSet;
 
 public abstract class ColorSource {
     protected byte[] data;
@@ -13,21 +12,6 @@ public abstract class ColorSource {
         this.cantordust = cantordust;
         this.data = data;
         this.symbol_map = new HashMap<Byte, Integer>();
-        TreeSet<Byte> sorted_uniques = new TreeSet<Byte>();
-        for (byte b : data) {
-            sorted_uniques.add(b);
-        }
-        Object[] listed_uniques = sorted_uniques.toArray();
-        /*
-            we are ignoring unsafe casting to create the symbol_map
-            the symbol_map is an array of every unique byte within the loaded program
-            mapped in a HashMap to the unsigned byte value.
-        */
-        for (int i = 0; i < listed_uniques.length; i++) {
-            int var = (int)((Byte)listed_uniques[i] & 0xff);
-            this.symbol_map.put((Byte)listed_uniques[i], var);
-            cantordust.cdprint(String.format("b: %02x : "+var+"\n", (Byte)listed_uniques[i]));
-        }
     }
 
     public boolean isType(String t){
@@ -38,8 +22,28 @@ public abstract class ColorSource {
         this.data = data;
     }
 
+    protected void rebuildSymbolMap() {
+        this.symbol_map.clear();
+        if(data == null || data.length == 0) {
+            return;
+        }
+
+        boolean[] present = new boolean[256];
+        for(byte b : data) {
+            present[b & 0xFF] = true;
+        }
+
+        int rank = 0;
+        for(int unsignedValue = 0; unsignedValue < 256; unsignedValue++) {
+            if(present[unsignedValue]) {
+                this.symbol_map.put((byte)unsignedValue, rank);
+                rank++;
+            }
+        }
+    }
+
     public int getLength() {
-        return data.length;
+        return data != null ? data.length : 0;
     }
 
     public Rgb point(int x) {

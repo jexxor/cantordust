@@ -1,6 +1,5 @@
 package resources;
 
-import java.awt.Color;
 public class Color8bpp extends ColorSource { /* see binvis - ColorHilbert class */
     Hilbert map;
     double step;
@@ -11,9 +10,11 @@ public class Color8bpp extends ColorSource { /* see binvis - ColorHilbert class 
 
     @Override
     public Rgb getPoint(int x) {
-        int unsignedByte = data[x] & 0xFF;
-        Color r = new Color(0, unsignedByte, 0);
-        Rgb rgb = new Rgb(r.getRed(), r.getGreen(), r.getBlue());
-        return rgb;
+        if(data == null || data.length == 0) {
+            return new Rgb(0, 0, 0);
+        }
+        int clampedX = Math.max(0, Math.min(x, data.length - 1));
+        int unsignedByte = data[clampedX] & 0xFF;
+        return new Rgb(0, unsignedByte, 0);
     }
 }

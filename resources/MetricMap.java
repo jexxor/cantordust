@@ -13,6 +13,8 @@ import java.awt.Color;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class MetricMap extends Visualizer{
     protected byte[] data;
@@ -45,6 +47,11 @@ public class MetricMap extends Visualizer{
     protected ColorSource csource;
     private JSlider dataWidthSlider;
     private final Object drawMonitor = new Object();
+    private final ExecutorService drawExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread worker = new Thread(r, "cantordust-metric-map-render");
+        worker.setDaemon(true);
+        return worker;
+    });
     private boolean drawInProgress = false;
     private boolean redrawRequested = false;
     private boolean isClassifier = false;
@@ -473,7 +480,7 @@ public class MetricMap extends Visualizer{
         JMenuItem hilbert = new JMenuItem("Hilbert");
         hilbert.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent e) {
-                if(!csource.type.equals("classifierPrediction")) {
+                if(!csource.isType("classifierPrediction")) {
                     isClassifier = false;
                 }
                 if(!map.isType("hilbert")) {
@@ -733,7 +740,7 @@ public class MetricMap extends Visualizer{
         if(!isShowing() && mainInterface.currVis != this && renderedImage != null) {
             return;
         }
-        if(!csource.type.equals("classifierPrediction")) {
+        if(!csource.isType("classifierPrediction")) {
             isClassifier = false;
         }
         synchronized(drawMonitor) {
@@ -744,7 +751,7 @@ public class MetricMap extends Visualizer{
             drawInProgress = true;
         }
 
-        Thread renderThread = new Thread(() -> {
+        drawExecutor.execute(() -> {
             while(true) {
                 synchronized(drawMonitor) {
                     if(!redrawRequested) {
@@ -755,9 +762,7 @@ public class MetricMap extends Visualizer{
                 }
                 renderCurrentState();
             }
-        }, "cantordust-metric-map-render");
-        renderThread.setDaemon(true);
-        renderThread.start();
+        });
     }
 
     private void renderCurrentState() {
@@ -779,15 +784,10 @@ public class MetricMap extends Visualizer{
         if(activeSource instanceof ColorClassifierPrediction) {
             ((ColorClassifierPrediction) activeSource).setBaseOffset(currentDataBaseOffset);
         }
-        if(activeSource.isType("spectrum")) {
-            activeSource = new ColorSpectrum(cantordust, currentData);
-        }
 
         if(activePlotType.equals("unrolled")) {
-            this.cantordust.cdprint("building unrolled "+renderMap.type+" curve\n");
             drawMap_unrolled(renderMap.type, size_hilbert, activeSource/*, dst, prog*/);
         } else if(activePlotType.equals("square")) {
-            this.cantordust.cdprint("Building square "+renderMap.type+" curve\n");
             drawMap_square(renderMap, activeSource, currentDataBaseOffset/*, dst, prog*/);
         }
     }
@@ -803,19 +803,27 @@ public class MetricMap extends Visualizer{
         TwoIntegerTuple dimensions = activeMap.dimensions();
         int width = dimensions.get(0);
         int height = dimensions.get(1);
-        int[][] nextPixelMap2D = new int[height][width*3];
-        HashMap<Integer, Integer> nextMemLoc = new HashMap<Integer, Integer>();
+        int[] nextPixelMap1D = new int[height * width * 3];
+        int mapLength = activeMap.getLength();
+        int memLocCapacity = Math.max(16, (int)(mapLength / 0.75f) + 1);
+        HashMap<Integer, Integer> nextMemLoc = new HashMap<Integer, Integer>(memLocCapacity);
         BufferedImage guideOverlay = getGuideOverlayForMap(activeMap);
 
-        float step = (float)activeSource.getLength()/(float)(activeMap.getLength());
-        for(int i=0; i<activeMap.getLength(); i++){
+        int sourceLength = Math.max(1, activeSource.getLength());
+        float step = (float)sourceLength / (float)Math.max(1, mapLength);
+        int lastSourceIndex = -1;
+        Rgb cachedColor = null;
+        for(int i=0; i<mapLength; i++){
             TwoIntegerTuple p = (TwoIntegerTuple)activeMap.point(i);
-            Rgb c = activeSource.point((int)(i*step));
-            add2DPixel(nextPixelMap2D, p, c);
-            nextMemLoc.put(i, (int)(i*step));
+            int sourceIndex = Math.max(0, Math.min(sourceLength - 1, (int)(i * step)));
+            if(sourceIndex != lastSourceIndex || cachedColor == null) {
+                cachedColor = activeSource.point(sourceIndex);
+                lastSourceIndex = sourceIndex;
+            }
+            add1DPixel(nextPixelMap1D, width, p, cachedColor);
+            nextMemLoc.put(i, sourceIndex);
         }
 
-        int[] nextPixelMap1D = convertPixelMapTo1D(nextPixelMap2D);
         //c.save(name);
         plotMap(dimensions, nextPixelMap1D, nextMemLoc, dataBaseOffset, activeMap, guideOverlay);
     }
@@ -847,6 +855,16 @@ public class MetricMap extends Visualizer{
         targetPixelMap[y][x] = color.r;
         targetPixelMap[y][x+1] = color.g;
         targetPixelMap[y][x+2] = color.b;
+    }
+
+    private void add1DPixel(int[] targetPixelMap, int width, TwoIntegerTuple point, Rgb color) {
+        int pixelIndex = (point.get(1) * width + point.get(0)) * 3;
+        if(pixelIndex < 0 || (pixelIndex + 2) >= targetPixelMap.length) {
+            return;
+        }
+        targetPixelMap[pixelIndex] = color.r;
+        targetPixelMap[pixelIndex + 1] = color.g;
+        targetPixelMap[pixelIndex + 2] = color.b;
     }
 
     public void addMemLoc(int idx, int rloc) {

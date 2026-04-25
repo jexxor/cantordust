@@ -1,10 +1,6 @@
 package resources;
 
 // utils
-import java.util.Map;
-import java.util.HashMap;
-import java.util.Collection;
-import java.util.Iterator;
 import java.lang.Error;
 
 public class Utils{
@@ -15,37 +11,31 @@ public class Utils{
         data = this.cantordust.getData();
     }
     public double entropy(byte[] data, int blocksize, int offset, int symbols) {
-        int start;
-        if(data.length < blocksize){
-            throw new Error("Data length must be larger than block size");
+        if(data == null || data.length == 0 || blocksize <= 0) {
+            return 0.0;
         }
-        if(offset < blocksize/2){
-            start = 0;
+
+        int effectiveBlockSize = Math.max(1, Math.min(blocksize, data.length));
+        int clampedOffset = Math.max(0, Math.min(offset, data.length - 1));
+        int start = clampedOffset - (effectiveBlockSize / 2);
+        start = Math.max(0, Math.min(start, data.length - effectiveBlockSize));
+        int end = Math.min(data.length, start + effectiveBlockSize);
+        int sampleCount = end - start;
+        if(sampleCount <= 1) {
+            return 0.0;
         }
-        else if(offset > data.length-blocksize/2){
-            start = data.length-blocksize/2;
+
+        int[] counts = new int[256];
+        for(int i = start; i < end; i++){
+            counts[data[i] & 0xFF]++;
         }
-        else {
-            start = offset-blocksize/2;
-        }
-        Map<Byte, Integer> hist = new HashMap<Byte, Integer>();
-        for(int i = start; i < start+blocksize; i++){
-            int count;
-            if((i == data.length)) {break;}
-            if(hist.get(data[i]) == null){count = 0;}
-            else {count = hist.get(data[i]);}
-            hist.put(data[i], count+1);
-        }
-        int base = Math.min(blocksize, symbols);
+        int base = Math.max(2, Math.min(sampleCount, symbols));
         double entropy = 0;
-        Collection<Integer> c = hist.values();
-        Iterator<Integer> itr = c.iterator();
-        while(itr.hasNext()) {
-            Integer next = (Integer) itr.next();
-            double p = next/(double)(blocksize);
-            // If blocksize < 256, the number of possible byte values is restricted.
-            // In that case, we adjust the log base to make sure we get a value
-            // between 0 and 1.
+        for(int count : counts) {
+            if(count == 0) {
+                continue;
+            }
+            double p = count / (double)sampleCount;
             double log = (double)Math.log(p)/(double)Math.log(base);
             entropy += (p * log);
         }

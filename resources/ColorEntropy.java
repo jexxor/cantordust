@@ -20,8 +20,8 @@ public class ColorEntropy extends ColorSource {
             return new Rgb(0, 0, 0);
         }
         int clampedX = Math.max(0, Math.min(x, data.length - 1));
-        int symbolCount = Math.max(1, this.symbol_map.size());
-        if(data.length < 2 || symbolCount < 2) {
+        int symbolCount = Math.min(256, data.length);
+        if(data.length < 2) {
             return new Rgb(0, 0, 0);
         }
         int blockSize = Math.min(32, data.length);

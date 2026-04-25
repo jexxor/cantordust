@@ -44,6 +44,15 @@ This fork currently includes the following behavior changes:
 - Fixed `ColorGradient` and `ColorClass` byte interpretation to use unsigned values (`0..255`) instead of signed Java bytes.
 - Fixed entropy shading for short data windows to avoid runtime errors and removed per-pixel debug logging that hurt rendering performance.
 - Replaced fragile string identity checks (`==`) in color/curve type checks with value comparisons (`equals`) for reliable mode detection.
+- Removed per-frame `ColorSpectrum` object recreation in Metric Map and switched spectrum to stable byte-value mapping (`0..255`), eliminating per-frame remap churn during scrubbing/playback.
+- Removed high-volume symbol debug logging from `ColorSource` setup to prevent console I/O from degrading color render throughput.
+- Fixed remaining color index safety gaps by clamping indices in `Color8bpp` and `ColorSpectrum`.
+- Fixed classifier block coverage so tail/partial blocks are classified (not dropped), and replaced exception-driven `classAtIndex` fallback with explicit bounds clamping.
+- Fixed entropy window math near EOF by using correctly clamped sampling ranges and normalizing probabilities by actual sampled bytes.
+- Metric Map redraw coalescing now reuses a single render executor instead of creating a new thread for each redraw burst.
+- Optimized Metric Map square rendering to write pixels directly into a 1D raster buffer (skipping intermediate 2D map + flatten pass), and reuse sampled source colors when adjacent curve points map to the same source index.
+- Optimized entropy computation internals to use fixed-size histogram arrays instead of per-call hash maps/iterators.
+- Removed unnecessary `java.awt.Color` object allocation in 8bpp/24bpp/32bpp color sources by decoding channels directly.
 
 ## Installation and Setup:
 

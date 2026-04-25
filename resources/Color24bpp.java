@@ -1,6 +1,5 @@
 package resources;
 
-import java.awt.Color;
 public class Color24bpp extends ColorSource { /* see binvis - ColorHilbert class */
     Hilbert map;
     double step;
@@ -18,9 +17,6 @@ public class Color24bpp extends ColorSource { /* see binvis - ColorHilbert class
         int b0 = data[clampedX] & 0xFF;
         int b1 = (clampedX + 1 < data.length) ? (data[clampedX + 1] & 0xFF) : b0;
         int b2 = (clampedX + 2 < data.length) ? (data[clampedX + 2] & 0xFF) : b1;
-        int pixel = (b2 << 16) | (b1 << 8) | b0;
-        Color r = new Color(pixel);
-        Rgb rgb = new Rgb(r.getRed(), r.getGreen(), r.getBlue());
-        return rgb;
+        return new Rgb(b2, b1, b0);
     }
 }
