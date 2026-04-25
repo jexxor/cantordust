@@ -14,7 +14,7 @@ Background and history: [Battelle blog post](https://inside.battelle.org/blog-de
 
 ## Preview
 
-https://github.com/user-attachments/assets/19ff888f-957d-4b63-aad2-89ba43ee2ba7
+https://github.com/user-attachments/assets/fbbbfabf-f5d7-401f-bb4a-37f75cddd9f4
 
 ## What's New in cantordust-ng
 
