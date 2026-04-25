@@ -1,6 +1,5 @@
 package resources;
 
-import java.awt.Color;
 public class Color16bpp_ARGB1555 extends ColorSource { /* see binvis - ColorHilbert class */
     Hilbert map;
     double step;
@@ -11,13 +10,28 @@ public class Color16bpp_ARGB1555 extends ColorSource { /* see binvis - ColorHilb
 
     @Override
     public Rgb getPoint(int x) {
-        if(x>=data.length-1){x = data.length-2;}
-        int alpha = (data[x+1] & 0x80) >> 7;
-        float red = ((data[x+1] & 0x7C) >> 2)/(0x1F);
-        float green = (((data[x+1] & 0x03) << 3) + ((data[x] & 0xE0) >> 5))/(0x1F);
-        float blue  = (data[x] & 0x1F)/(0x1F); 
-        Color r = new Color(red, green, blue, alpha);
-        Rgb rgb = new Rgb(r.getRed(), r.getGreen(), r.getBlue());
-        return rgb;
+        if(data == null || data.length == 0) {
+            return new Rgb(0, 0, 0);
+        }
+
+        int clampedX = Math.max(0, Math.min(x, Math.max(0, data.length - 2)));
+        int lowByte = data[clampedX] & 0xFF;
+        int highByte = (clampedX + 1 < data.length) ? (data[clampedX + 1] & 0xFF) : lowByte;
+
+        int alphaBit = (highByte & 0x80) >>> 7;
+        int red5 = (highByte & 0x7C) >>> 2;
+        int green5 = ((highByte & 0x03) << 3) | ((lowByte & 0xE0) >>> 5);
+        int blue5 = lowByte & 0x1F;
+
+        // Use integer scaling to avoid quantization from integer division.
+        int red = (red5 * 255 + 15) / 31;
+        int green = (green5 * 255 + 15) / 31;
+        int blue = (blue5 * 255 + 15) / 31;
+
+        // MetricMap consumes opaque RGB only, so treat 1-bit alpha as visible/hidden.
+        if(alphaBit == 0) {
+            return new Rgb(0, 0, 0);
+        }
+        return new Rgb(red, green, blue);
     }
 }

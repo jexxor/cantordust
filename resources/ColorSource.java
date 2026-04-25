@@ -31,9 +31,7 @@ public abstract class ColorSource {
     }
 
     public boolean isType(String t){
-        if(this.type == t){
-            return true;
-        } else { return false; }
+        return this.type != null && this.type.equals(t);
     }
 
     public void setData(byte[] data){

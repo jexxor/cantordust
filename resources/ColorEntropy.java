@@ -16,9 +16,16 @@ public class ColorEntropy extends ColorSource {
 
     @Override
     public Rgb getPoint(int x) {
-        double e = this.utils.entropy(this.data, 32, x, this.symbol_map.size());
-        this.cantordust.cdprint("offset: " + x + "\n");
-        this.cantordust.cdprint("entropy: " + e + "\n");
+        if(data == null || data.length == 0) {
+            return new Rgb(0, 0, 0);
+        }
+        int clampedX = Math.max(0, Math.min(x, data.length - 1));
+        int symbolCount = Math.max(1, this.symbol_map.size());
+        if(data.length < 2 || symbolCount < 2) {
+            return new Rgb(0, 0, 0);
+        }
+        int blockSize = Math.min(32, data.length);
+        double e = this.utils.entropy(this.data, blockSize, clampedX, symbolCount);
         double r;
         if (e > 0.5) {
             r = curve(e - 0.5);
@@ -26,12 +33,10 @@ public class ColorEntropy extends ColorSource {
             r = 0;
         }
         double b = Math.pow(e, 2);
-        this.cantordust.cdprint("r: "+r+"\n");
-        this.cantordust.cdprint("b: "+b+"\n");
         return new Rgb(
-            (int)(255 * r), 
+            (int)(255 * Math.max(0, Math.min(1, r))), 
             0, 
-            (int)(255 * b)
+            (int)(255 * Math.max(0, Math.min(1, b)))
         );
     }
 }

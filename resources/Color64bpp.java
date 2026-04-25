@@ -1,6 +1,5 @@
 package resources;
 
-import java.awt.Color;
 public class Color64bpp extends ColorSource { /* see binvis - ColorHilbert class */
     Hilbert map;
     double step;
@@ -11,10 +10,29 @@ public class Color64bpp extends ColorSource { /* see binvis - ColorHilbert class
 
     @Override
     public Rgb getPoint(int x) {
-        if(x>=data.length-7){x = data.length-8;}
-        int pixel = ((data[x+7] << 56) + (data[x+6] << 48) + (data[x+5] << 40) + (data[x+4] << 32) + (data[x+3] << 24) + (data[x+2] << 16) + (data[x+1] << 8) + data[x]) & 0xFFFFFFFF;
-        Color r = new Color(pixel, true);
-        Rgb rgb = new Rgb(r.getRed(), r.getGreen(), r.getBlue());
-        return rgb;
+        if(data == null || data.length == 0) {
+            return new Rgb(0, 0, 0);
+        }
+
+        int clampedX = Math.max(0, Math.min(x, Math.max(0, data.length - 8)));
+        int blue16 = readUint16LE(clampedX);
+        int green16 = readUint16LE(clampedX + 2);
+        int red16 = readUint16LE(clampedX + 4);
+        int alpha16 = readUint16LE(clampedX + 6);
+
+        int red = (red16 * 255 + 32767) / 65535;
+        int green = (green16 * 255 + 32767) / 65535;
+        int blue = (blue16 * 255 + 32767) / 65535;
+
+        if(alpha16 == 0) {
+            return new Rgb(0, 0, 0);
+        }
+        return new Rgb(red, green, blue);
+    }
+
+    private int readUint16LE(int offset) {
+        int lo = (offset >= 0 && offset < data.length) ? (data[offset] & 0xFF) : 0;
+        int hi = (offset + 1 >= 0 && offset + 1 < data.length) ? (data[offset + 1] & 0xFF) : lo;
+        return lo | (hi << 8);
     }
 }

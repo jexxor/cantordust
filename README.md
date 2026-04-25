@@ -37,6 +37,13 @@ This fork currently includes the following behavior changes:
 - Horizontal width/offset sliders in the Linear Bitmap view now update interactively while dragging (not only on mouse release).
 - Metric Map initial render-on-open was fixed so first-time open reliably draws the map.
 - Added a sequence guide path to the Metric Map, which can be enabled/disabled with the `Sequence Guide` checkbox in the Metric Map popup menu.
+- Fixed ARGB1555 decoding in Metric Map so 5-bit channels are scaled correctly and short windows do not cause bounds errors.
+- Fixed 24bpp/32bpp color unpacking to use unsigned byte channels and safe index clamping for very small data windows.
+- Reworked 64bpp color decoding to properly downconvert 16-bit channels (with alpha handling) instead of invalid 32-bit-shift truncation.
+- Fixed classifier prediction wavelength conversion where green channel extraction mask was incorrect.
+- Fixed `ColorGradient` and `ColorClass` byte interpretation to use unsigned values (`0..255`) instead of signed Java bytes.
+- Fixed entropy shading for short data windows to avoid runtime errors and removed per-pixel debug logging that hurt rendering performance.
+- Replaced fragile string identity checks (`==`) in color/curve type checks with value comparisons (`equals`) for reliable mode detection.
 
 ## Installation and Setup:
 

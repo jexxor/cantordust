@@ -24,9 +24,7 @@ public class Scurve{
     public int getWidth(){return this.size;}
     public int getHeight(){return this.size;}
     public boolean isType(String t){
-        if(this.type == t){
-            return true;
-        } else { return false; }
+        return this.type != null && this.type.equals(t);
     }
     public Scurve fromSize(String curve, int dimension, int size){
         return new Hilbert(this.cantordust, dimension, size);

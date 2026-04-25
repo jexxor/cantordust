@@ -5,7 +5,7 @@ import java.awt.Color;
 public class WavelengthToRGB {
     public static Color waveLengthToRGB(double wavelength) {
         int encodedRGB = wavelengthToRGBinteger(wavelength);
-        return new Color((encodedRGB & 0xff0000) >> 16, (encodedRGB & 0xff) >> 8, encodedRGB & 0xff);
+        return new Color((encodedRGB & 0xff0000) >> 16, (encodedRGB & 0x00ff00) >> 8, encodedRGB & 0x0000ff);
     }
     /*
         Convert a wavelength in the visible light spectrum to a RGB color value that is suitable to be displayed on a
