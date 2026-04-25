@@ -19,40 +19,9 @@ Take a look at [this blogpost](https://inside.battelle.org/blog-details/battelle
 
 https://github.com/user-attachments/assets/19ff888f-957d-4b63-aad2-89ba43ee2ba7
 
-### Fork changes
+### Fork changelog
 
-This fork currently includes the following behavior changes:
-
-- Main Cantordust window is explicitly resizable and supports fullscreen better.
-- Main visualization area now scales with window size instead of staying fixed.
-- Metric Map now scales with the main window size, including click-to-address mapping.
-- Two Tuple view now shows a click popup with tuple coordinates in `(0xXX, 0xYY)` format.
-- Fixed fast-scroll stability issues that could throw exceptions and spike CPU usage by hardening slider bitmap rendering, Two Tuple cache bounds handling, and serializing Metric Map redraws to prevent concurrent `HashMap` corruption (`Node`/`TreeNode` class cast crash).
-- Fixed upper-thumb interaction in the relative (micro) range slider so it can be dragged reliably.
-- Added playback controls (`Play`, `Pause`, `Stop`, `Loop`, `Step`, and interval `ms`) with slider target selection (`Absolute`, `Macro`, `Micro`) so selected sliders can auto-run top-to-bottom.
-- Data-window updates now use a latest-wins queue, and bitmap/two-tuple/metric map renderers now coalesce background work so rapid playback drops stale frames instead of spawning unbounded render threads.
-- Playback performance was tuned for heavy workloads by reducing hidden-view redraw pressure, using faster bitmap scaling during playback, and using a reduced-cost Metric Map / sampled Two Tuple render path while playback is active.
-- Metric Map popup address/class lookup was fixed to align with the currently rendered zoomed state (including classifier mode), instead of stale/unzoomed coordinates.
-- Classifier prediction rendering now guards null/uninitialized classifier state and falls back safely instead of throwing runtime exceptions.
-- Horizontal width/offset sliders in the Linear Bitmap view now update interactively while dragging (not only on mouse release).
-- Metric Map initial render-on-open was fixed so first-time open reliably draws the map.
-- Added a sequence guide path to the Metric Map, which can be enabled/disabled with the `Sequence Guide` checkbox in the Metric Map popup menu.
-- Fixed ARGB1555 decoding in Metric Map so 5-bit channels are scaled correctly and short windows do not cause bounds errors.
-- Fixed 24bpp/32bpp color unpacking to use unsigned byte channels and safe index clamping for very small data windows.
-- Reworked 64bpp color decoding to properly downconvert 16-bit channels (with alpha handling) instead of invalid 32-bit-shift truncation.
-- Fixed classifier prediction wavelength conversion where green channel extraction mask was incorrect.
-- Fixed `ColorGradient` and `ColorClass` byte interpretation to use unsigned values (`0..255`) instead of signed Java bytes.
-- Fixed entropy shading for short data windows to avoid runtime errors and removed per-pixel debug logging that hurt rendering performance.
-- Replaced fragile string identity checks (`==`) in color/curve type checks with value comparisons (`equals`) for reliable mode detection.
-- Removed per-frame `ColorSpectrum` object recreation in Metric Map and switched spectrum to stable byte-value mapping (`0..255`), eliminating per-frame remap churn during scrubbing/playback.
-- Removed high-volume symbol debug logging from `ColorSource` setup to prevent console I/O from degrading color render throughput.
-- Fixed remaining color index safety gaps by clamping indices in `Color8bpp` and `ColorSpectrum`.
-- Fixed classifier block coverage so tail/partial blocks are classified (not dropped), and replaced exception-driven `classAtIndex` fallback with explicit bounds clamping.
-- Fixed entropy window math near EOF by using correctly clamped sampling ranges and normalizing probabilities by actual sampled bytes.
-- Metric Map redraw coalescing now reuses a single render executor instead of creating a new thread for each redraw burst.
-- Optimized Metric Map square rendering to write pixels directly into a 1D raster buffer (skipping intermediate 2D map + flatten pass), and reuse sampled source colors when adjacent curve points map to the same source index.
-- Optimized entropy computation internals to use fixed-size histogram arrays instead of per-call hash maps/iterators.
-- Removed unnecessary `java.awt.Color` object allocation in 8bpp/24bpp/32bpp color sources by decoding channels directly.
+See [CHANGELOG.md](CHANGELOG.md) for more details.
 
 ## Installation and Setup:
 

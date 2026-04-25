@@ -18,4 +18,14 @@ public class ColorGradient extends ColorSource {
             (int)(255*c), 
             (int)(255*c));
     }
+
+    @Override
+    public int pointArgb(int x) {
+        if(data == null || data.length == 0) {
+            return 0xFF000000;
+        }
+        int clampedX = Math.max(0, Math.min(x, data.length - 1));
+        int gray = data[clampedX] & 0xFF;
+        return (0xFF << 24) | (gray << 16) | (gray << 8) | gray;
+    }
 }

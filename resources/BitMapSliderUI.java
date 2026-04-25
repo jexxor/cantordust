@@ -10,6 +10,8 @@ import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.Shape;
 import java.awt.event.MouseEvent;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import javax.swing.JSlider;
 import javax.swing.SwingUtilities;
@@ -21,6 +23,12 @@ import javax.swing.SwingUtilities;
 class BitMapSliderUI extends RangeSliderUI {
     private volatile BufferedImage img;
     private final Object bitmapRequestLock = new Object();
+    private final ExecutorService bitmapExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread worker = new Thread(r, "cantordust-slider-bitmap");
+        worker.setDaemon(true);
+        return worker;
+    });
+    private int[] bitmapPixels = new int[0];
     private int pendingLow = 0;
     private int pendingHigh = 0;
     private boolean bitmapWorkerRunning = false;
@@ -76,9 +84,7 @@ class BitMapSliderUI extends RangeSliderUI {
             bitmapWorkerRunning = true;
         }
 
-        Thread worker = new Thread(() -> processBitmapRequests(), "cantordust-slider-bitmap");
-        worker.setDaemon(true);
-        worker.start();
+        bitmapExecutor.execute(() -> processBitmapRequests());
     }
 
     private void processBitmapRequests() {
@@ -133,17 +139,17 @@ class BitMapSliderUI extends RangeSliderUI {
         int width = (mainInterface != null && mainInterface.isPlaybackActive()) ? 200 : 400;
         int height = (high-low)/width-1 > 0? (high-low)/width-1 : 1;
 
-        // Create a new image
         img = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
-        int count = low;
-
-        // Populate the image
-        for(int y=0; y < img.getHeight(); y++) {
-            for(int x=0; x < img.getWidth(); x++) {
-                count = count+1 < data.length-1? count+1 : data.length-1;
-                img.setRGB(x, y, ((data[count] & 0xff) << 8));
-            }
+        int pixelCount = width * height;
+        if(bitmapPixels.length != pixelCount) {
+            bitmapPixels = new int[pixelCount];
         }
+        int count = low;
+        for(int pixelIndex = 0; pixelIndex < pixelCount; pixelIndex++) {
+            count = count + 1 < data.length - 1 ? count + 1 : data.length - 1;
+            bitmapPixels[pixelIndex] = ((data[count] & 0xff) << 8);
+        }
+        img.setRGB(0, 0, width, height, bitmapPixels, 0, width);
 
         SwingUtilities.invokeLater(() -> this.slider.repaint());
     }
@@ -228,10 +234,8 @@ class BitMapSliderUI extends RangeSliderUI {
      */
 
     public class BitMapTrackListener extends RangeSliderUI.RangeTrackListener {
-        private static final long WINDOW_SLIDE_EMIT_INTERVAL_MS = 33L;
         private boolean windowSliding;
         private double previousY;
-        private long lastWindowSlideEmitMs;
         private int lastWindowSlideValue = Integer.MIN_VALUE;
 
         private boolean isBetweenThumbs(int x, int y) {
@@ -255,12 +259,10 @@ class BitMapSliderUI extends RangeSliderUI {
                     thumbRect.setLocation((int)(thumbRect.getX()), thumbRectNewY);
                     int thumbMiddle = thumbRectNewY + (thumbRect.height / 2);
                     int newVal = valueForYPosition(thumbMiddle);
-                    long now = System.currentTimeMillis();
-                    if(newVal != lastWindowSlideValue && (now - lastWindowSlideEmitMs >= WINDOW_SLIDE_EMIT_INTERVAL_MS)) {
+                    if(newVal != lastWindowSlideValue) {
                         ((BitMapSlider)slider).getModel().setRangeProperties(newVal, slider.getExtent(), slider.getMinimum(),
                                 slider.getMaximum(), true);
                         lastWindowSlideValue = newVal;
-                        lastWindowSlideEmitMs = now;
                     }
                     slider.repaint();
                     slider.setCursor(new Cursor(e.getY() > oldY ? Cursor.S_RESIZE_CURSOR: Cursor.N_RESIZE_CURSOR));
@@ -358,7 +360,6 @@ class BitMapSliderUI extends RangeSliderUI {
                 slider.setValueIsAdjusting(true);
                 lowerDragging = true;
                 upperDragging = false;
-                lastWindowSlideEmitMs = 0L;
                 lastWindowSlideValue = Integer.MIN_VALUE;
                 return;
             }

@@ -55,5 +55,10 @@ public abstract class ColorSource {
         return getPoint(x);
     }
 
+    public int pointArgb(int x) {
+        Rgb color = getPoint(x);
+        return (0xFF << 24) | (color.r << 16) | (color.g << 8) | color.b;
+    }
+
     public abstract  Rgb getPoint(int x);
     }

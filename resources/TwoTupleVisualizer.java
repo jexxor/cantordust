@@ -4,29 +4,40 @@ import java.awt.Color;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
+import java.awt.RenderingHints;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
+import java.awt.image.DataBufferInt;
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import javax.swing.*;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
 
 public class TwoTupleVisualizer extends Visualizer {
     private volatile BufferedImage img;
+    private static final int TUPLE_SPACE = 256 * 256;
     private int divisions = 20;
-    private ArrayList<HashMap<TwoByteTuple, Integer>> cachedFreqMaps;
-    HashSet<TwoByteTuple> existingTuples;
+    private ArrayList<int[]> cachedFreqMaps;
     private Popup coordinatePopup;
     private String colorMode = "g";
     private Boolean gradientMode = true;
     private int cycles = 0;
+    private final int[] playbackFreqs = new int[TUPLE_SPACE];
+    private final int[] touchedPlaybackTupleIndices = new int[TUPLE_SPACE];
+    private final int[] aggregateFreqs = new int[TUPLE_SPACE];
+    private final int[] touchedAggregateTupleIndices = new int[TUPLE_SPACE];
     private final Object cacheLock = new Object();
     private final Object renderRequestLock = new Object();
+    private final ExecutorService renderExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread worker = new Thread(r, "cantordust-twotuple-render");
+        worker.setDaemon(true);
+        return worker;
+    });
     private boolean renderWorkerRunning = false;
     private int pendingRenderGeneration = 0;
 
@@ -54,8 +65,13 @@ public class TwoTupleVisualizer extends Visualizer {
 
         Rectangle window = getVisibleRect();
 
-        if (img != null)
-            g.drawImage(img, 0, 0, (int)window.getWidth(), (int)window.getHeight(), this);
+        if (img != null) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF);
+            g2.drawImage(img, 0, 0, (int)window.getWidth(), (int)window.getHeight(), this);
+            g2.dispose();
+        }
     }
 
     public void constructImageAsync() {
@@ -70,9 +86,7 @@ public class TwoTupleVisualizer extends Visualizer {
             renderWorkerRunning = true;
         }
 
-        Thread worker = new Thread(() -> processRenderRequests(), "cantordust-twotuple-render");
-        worker.setDaemon(true);
-        worker.start();
+        renderExecutor.execute(() -> processRenderRequests());
     }
 
     private void processRenderRequests() {
@@ -122,158 +136,144 @@ public class TwoTupleVisualizer extends Visualizer {
         }
 
         BufferedImage nextImage = new BufferedImage(256, 256, BufferedImage.TYPE_INT_ARGB);
-        gradientPlot(nextImage.createGraphics(), bounds[0], bounds[1]);
+        gradientPlot(nextImage, dataHolder[0], bounds[0], bounds[1]);
         SwingUtilities.invokeLater(() -> {
             img = nextImage;
             repaint();
         });
     }
 
-    private HashMap<TwoByteTuple, Integer> countedByteFrequencies(int low, int high) {
-        return countedByteFrequencies(low, high, 1);
+    private int[] countedByteFrequencies(byte[] data, int low, int high) {
+        return countedByteFrequencies(data, low, high, 1);
     }
 
-    private HashMap<TwoByteTuple, Integer> countedByteFrequencies(int low, int high, int stride) {
-        // data needs fixed for large file sizes
-        byte[] data = cantordust.getMainInterface().getData();
-        HashMap<TwoByteTuple, Integer> tuples = new HashMap<>();
+    private int[] countedByteFrequencies(byte[] data, int low, int high, int stride) {
+        int[] tuples = new int[TUPLE_SPACE];
+        if(data == null || data.length < 2) {
+            return tuples;
+        }
         int start = Math.max(0, low);
-        int end = Math.min(high, data.length);
+        int endExclusive = Math.max(start, Math.min(high, data.length));
         int step = Math.max(1, stride);
-        for(int tupleIdx = start; tupleIdx < end - 1; tupleIdx += step) {
-            TwoByteTuple tuple = new TwoByteTuple(data[tupleIdx], data[tupleIdx+1]);
-            Integer freq = tuples.get(tuple);
-            if(freq != null) {
-                tuples.put(tuple, freq + 1);
-            } else {
-                tuples.put(tuple,  1);
-            }
+        for(int tupleIdx = start; tupleIdx + 1 < endExclusive; tupleIdx += step) {
+            int first = data[tupleIdx] & 0xFF;
+            int second = data[tupleIdx + 1] & 0xFF;
+            int tupleIndex = (first << 8) | second;
+            tuples[tupleIndex] = tuples[tupleIndex] + 1;
         }
         return tuples;
     }
 
     private void initializeCaches() {
-        ArrayList<HashMap<TwoByteTuple, Integer>> newCache = new ArrayList<HashMap<TwoByteTuple, Integer>>();
-        HashSet<TwoByteTuple> newExistingTuples = new HashSet<TwoByteTuple>();
-        // data needs fixed for large file sizes
+        ArrayList<int[]> newCache = new ArrayList<int[]>();
         byte[] data = cantordust.getMainInterface().getData();
+        if(data == null || data.length == 0) {
+            synchronized(cacheLock) {
+                cachedFreqMaps = newCache;
+            }
+            return;
+        }
         int cachedSize = Math.max(1, data.length / divisions);
         for(int div = 0; div < divisions - 1; div++) {
-            newCache.add(countedByteFrequencies(div*cachedSize, (div+1)*cachedSize));
+            newCache.add(countedByteFrequencies(data, div*cachedSize, (div+1)*cachedSize));
         }
-        newCache.add(countedByteFrequencies((divisions-1)*cachedSize, data.length));
+        newCache.add(countedByteFrequencies(data, (divisions-1)*cachedSize, data.length));
 
         synchronized(cacheLock) {
             cachedFreqMaps = newCache;
-            existingTuples = newExistingTuples;
         }
     }
 
-    private void gradientPlot(Graphics2D g, int low, int high) {
+    private void gradientPlot(BufferedImage image, byte[] data, int low, int high) {
         cycles += 1;
+        int[] pixelBuffer = ((DataBufferInt)image.getRaster().getDataBuffer()).getData();
+        if(data == null || data.length < 2) {
+            return;
+        }
         boolean interactiveScrub = dataRangeSlider != null && dataRangeSlider.getValueIsAdjusting();
         if(mainInterface.isPlaybackActive() || interactiveScrub) {
-            byte[] data = cantordust.getMainInterface().getData();
             int range = Math.max(1, high - low);
             int stride = Math.max(1, range / 65536);
-            int[] playbackFreqs = new int[256 * 256];
+            int touchedCount = 0;
             int start = Math.max(0, low);
             int end = Math.min(high, data.length - 1);
             for(int tupleIdx = start; tupleIdx < end; tupleIdx += stride) {
                 int first = data[tupleIdx] & 0xFF;
                 int second = data[tupleIdx + 1] & 0xFF;
                 int tupleIndex = (first << 8) | second;
+                if(playbackFreqs[tupleIndex] == 0) {
+                    touchedPlaybackTupleIndices[touchedCount++] = tupleIndex;
+                }
                 playbackFreqs[tupleIndex] = playbackFreqs[tupleIndex] + 1;
             }
-            for(int tupleIndex = 0; tupleIndex < playbackFreqs.length; tupleIndex++) {
+            for(int touchedIdx = 0; touchedIdx < touchedCount; touchedIdx++) {
+                int tupleIndex = touchedPlaybackTupleIndices[touchedIdx];
                 int freq = playbackFreqs[tupleIndex];
-                if(freq == 0) {
-                    continue;
-                }
-                g.setColor(getColor(freq, colorMode));
                 int x = (tupleIndex >> 8) & 0xFF;
                 int y = tupleIndex & 0xFF;
-                g.fillRect(y, x, 1, 1);
+                setTuplePixel(pixelBuffer, x, y, getColorArgb(freq, colorMode));
+                playbackFreqs[tupleIndex] = 0;
             }
-            g.dispose();
             return;
         }
 
-        // data needs fixed for large file sizes
-        int cachedSize = Math.max(1, this.cantordust.getMainInterface().getData().length / divisions);
-        HashMap<TwoByteTuple, Integer> totalFreqs = new HashMap<>();
-        HashMap<TwoByteTuple, Integer> leftStraggler = null;
-        HashMap<TwoByteTuple, Integer> rightStraggler = null;
-        ArrayList<HashMap<TwoByteTuple, Integer>> cacheSnapshot;
+        int cachedSize = Math.max(1, data.length / divisions);
+        int touchedCount = 0;
+        ArrayList<int[]> cacheSnapshot;
         synchronized(cacheLock) {
-            cacheSnapshot = cachedFreqMaps == null ? new ArrayList<HashMap<TwoByteTuple, Integer>>() : new ArrayList<HashMap<TwoByteTuple, Integer>>(cachedFreqMaps);
+            cacheSnapshot = cachedFreqMaps == null ? new ArrayList<int[]>() : new ArrayList<int[]>(cachedFreqMaps);
         }
-        int firstCacheBlockStart = nextBlock(low, cachedSize);
-        int lastCacheBlockEnd = lastBlock(high, cachedSize);
-        if(firstCacheBlockStart != low) {
-            leftStraggler = countedByteFrequencies(low, firstCacheBlockStart-1);
-            for(TwoByteTuple tuple: leftStraggler.keySet()) {
-                if(totalFreqs.containsKey(tuple)) {
-                    totalFreqs.put(tuple, leftStraggler.get(tuple) + totalFreqs.get(tuple));
-                } else {
-                    totalFreqs.put(tuple, leftStraggler.get(tuple));
-                }
+
+        int start = Math.max(0, Math.min(low, data.length));
+        int end = Math.max(start, Math.min(high, data.length));
+        int firstAligned = ((start + cachedSize - 1) / cachedSize) * cachedSize;
+
+        int prefixEnd = Math.min(end, firstAligned);
+        if(prefixEnd > start) {
+            int[] prefixFreqs = countedByteFrequencies(data, start, prefixEnd);
+            touchedCount = mergeFreqCounts(prefixFreqs, aggregateFreqs, touchedAggregateTupleIndices, touchedCount);
+        }
+
+        int blockStart = firstAligned;
+        while(blockStart + cachedSize <= end) {
+            int blockIndex = blockStart / cachedSize;
+            if(blockIndex >= 0 && blockIndex < cacheSnapshot.size()) {
+                touchedCount = mergeFreqCounts(cacheSnapshot.get(blockIndex), aggregateFreqs, touchedAggregateTupleIndices, touchedCount);
+            } else {
+                int[] blockFreqs = countedByteFrequencies(data, blockStart, blockStart + cachedSize);
+                touchedCount = mergeFreqCounts(blockFreqs, aggregateFreqs, touchedAggregateTupleIndices, touchedCount);
             }
+            blockStart += cachedSize;
         }
-        for(int currentBlock = firstCacheBlockStart / cachedSize; currentBlock <= lastCacheBlockEnd / cachedSize; currentBlock++) {
-            int cacheIndex = currentBlock - 1;
-            if(cacheIndex >= 0 && cacheIndex < cacheSnapshot.size()) {
-                mergeFreqCounts(cacheSnapshot.get(cacheIndex), totalFreqs);
+
+        if(blockStart < end) {
+            int[] suffixFreqs = countedByteFrequencies(data, blockStart, end);
+            touchedCount = mergeFreqCounts(suffixFreqs, aggregateFreqs, touchedAggregateTupleIndices, touchedCount);
+        }
+
+        for(int touchedIdx = 0; touchedIdx < touchedCount; touchedIdx++) {
+            int tupleIndex = touchedAggregateTupleIndices[touchedIdx];
+            int freq = aggregateFreqs[tupleIndex];
+            int x = (tupleIndex >> 8) & 0xFF;
+            int y = tupleIndex & 0xFF;
+            setTuplePixel(pixelBuffer, x, y, getColorArgb(freq, colorMode));
+            aggregateFreqs[tupleIndex] = 0;
+        }
+    }
+
+    private int mergeFreqCounts(int[] sender, int[] reciever, int[] touchedIndices, int touchedCount) {
+        for(int tupleIndex = 0; tupleIndex < sender.length; tupleIndex++) {
+            int value = sender[tupleIndex];
+            if(value == 0) {
+                continue;
             }
+            if(reciever[tupleIndex] == 0) {
+                touchedIndices[touchedCount++] = tupleIndex;
+            }
+            reciever[tupleIndex] = reciever[tupleIndex] + value;
         }
-
-        int colorStep = 5;
-        int min = 0;
-        for(TwoByteTuple twoTuple: totalFreqs.keySet()) {
-            int freq = totalFreqs.get(twoTuple);
-            //g.setColor(new Color(0, min + (freq*colorStep > 255 - min ? 255 - min : freq*colorStep), 0));
-            g.setColor(getColor(freq, colorMode));
-            //int colorVal = min + (freq*colorStep > 255 - min ? 255 - min : freq*colorStep);
-            //g.setColor(new Color(colorVal, colorVal, colorVal));
-            int x = twoTuple.x & 0xff;
-            int y = twoTuple.y & 0xff;
-            g.fillRect(y, x, 1, 1);
-
-        }
-        g.dispose();
+        return touchedCount;
     }
-
-    private void mergeFreqCounts(HashMap<TwoByteTuple, Integer> sender, HashMap<TwoByteTuple, Integer> reciever) {
-        for(TwoByteTuple tuple: sender.keySet()) {
-            reciever.put(tuple, sender.get(tuple) + (reciever.containsKey(tuple) ? reciever.get(tuple) : 0));
-        }
-    }
-
-    private int nextBlock(int x, int size) {
-        if (x % size == 0) {
-            return x;
-        } else if (x < size) {
-            return size;
-        } else {
-            return Math.floorDiv(x, size)*size + size;
-        }
-    }
-
-    private int lastBlock(int x, int size) {
-        return x - (x % size);
-    }
-        /*int colorStep = 10;
-        int min = 60;
-        for(TwoByteTuple twoTuple: tuples.keySet()) {
-            freq = tuples.get(twoTuple);
-            g.setColor(new Color(0, min + (freq*colorStep > 255 - min ? 255 - min : freq*colorStep), 0));
-            //int colorVal = min + (freq*colorStep > 255 - min ? 255 - min : freq*colorStep);
-            //g.setColor(new Color(colorVal, colorVal, colorVal));
-            int x = twoTuple.x & 0xff;
-            int y = twoTuple.y & 0xff;
-            g.fill(new Rectangle2D.Double(x, y, 1, 1));
-        }
-    }*/
 
     public static int getWindowSize() {
         return 500;
@@ -302,31 +302,42 @@ public class TwoTupleVisualizer extends Visualizer {
         }
     }
 
-    private Color getColor(int freq, String rgbPosition) {
+    private int getColorArgb(int freq, String rgbPosition) {
         int colorStep = 5;
         int min = 10;
+        int channelValue = min + (freq * colorStep > 255 - min ? 255 - min : freq * colorStep);
         switch(rgbPosition) {
             case "r":
                 if(gradientMode)
-                    return new Color(min + (freq*colorStep > 255 - min ? 255 - min : freq*colorStep), 0, 0);
+                    return (0xFF << 24) | (channelValue << 16);
                 else {
-                    return Color.RED;
+                    return 0xFFFF0000;
                 }
             case "g":
                 if(gradientMode) {
-                    return new Color(0, min + (freq * colorStep > 255 - min ? 255 - min : freq * colorStep), 0);
+                    return (0xFF << 24) | (channelValue << 8);
                 } else {
-                    return Color.GREEN;
+                    return 0xFF00FF00;
                 }
             case "b":
                 if(gradientMode) {
-                    return new Color(0, 0, min + (freq * colorStep > 255 - min ? 255 - min : freq * colorStep));
+                    return (0xFF << 24) | channelValue;
                 } else {
-                    return Color.BLUE;
+                    return 0xFF0000FF;
                 }
             default:
-                return null;
+                return 0xFF00FF00;
         }
+    }
+
+    private void setTuplePixel(int[] pixelBuffer, int firstByte, int secondByte, int argb) {
+        int row = firstByte & 0xFF;
+        int col = secondByte & 0xFF;
+        int pixelIndex = row * 256 + col;
+        if(pixelIndex < 0 || pixelIndex >= pixelBuffer.length) {
+            return;
+        }
+        pixelBuffer[pixelIndex] = argb;
     }
 
     public void createPopupMenu(JFrame frame){

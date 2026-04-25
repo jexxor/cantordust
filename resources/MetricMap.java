@@ -6,32 +6,38 @@ import javax.swing.JPanel;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
 import java.awt.event.*;
-import java.util.HashMap;
 import java.awt.image.*;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
+import java.util.Collections;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.Set;
 
 public class MetricMap extends Visualizer{
+    private static final Set<MetricMap> LIVE_INSTANCES = Collections.newSetFromMap(new ConcurrentHashMap<MetricMap, Boolean>());
     protected byte[] data;
     protected static int size_hilbert = 512;
-    private static final int PLAYBACK_RENDER_SIZE = 256;
     private static final long GUIDE_FOCUS_UPDATE_THROTTLE_MS = 16L;
+    private static final byte[] EMPTY_BYTES = new byte[0];
+    private byte[] reusableCurrentDataBuffer = new byte[0];
     protected int[][] pixelMap2D;
     protected int[] pixelMap1D;
-    protected HashMap<Integer, Integer> memLoc = new HashMap<Integer, Integer>();
     private volatile int memLocBaseOffset = 0;
+    private volatile int renderSourceLength = 1;
+    private volatile int renderMapLength = 1;
+    private volatile long lastRenderPublishMs = 0L;
     private volatile Scurve renderLookupMap;
     private volatile BufferedImage renderedImage;
     private volatile BufferedImage renderedGuideOverlay;
-    private Scurve playbackHilbertMap;
-    private Scurve playbackZorderMap;
-    private Scurve playbackHcurveMap;
-    private Linear playbackLinearMap;
+    private volatile PointCache cachedPointCache;
+    private volatile SourceOffsetCache cachedSourceOffsetCache;
+    private final Object pointCacheLock = new Object();
+    private final Object sourceOffsetCacheLock = new Object();
     private BufferedImage cachedGuideOverlay;
     private String cachedGuideOverlayKey;
     private boolean guidePathEnabled = false;
@@ -54,10 +60,12 @@ public class MetricMap extends Visualizer{
     });
     private boolean drawInProgress = false;
     private boolean redrawRequested = false;
+    private volatile long drawRequestVersion = 0L;
     private boolean isClassifier = false;
 
     public MetricMap(int windowSize, GhidraSrc cantordust, JFrame frame, Boolean isCurrentView) {
         super(windowSize, cantordust);
+        registerLiveInstance();
         data = this.cantordust.getMainInterface().getData();
         dataWidthSlider = this.cantordust.getMainInterface().widthSlider;
         createPopupMenu(frame);
@@ -72,6 +80,7 @@ public class MetricMap extends Visualizer{
     // Special constructor for initialization of plugin
     public MetricMap(int windowSize, GhidraSrc cantordust, MainInterface mainInterface, JFrame frame, Boolean isCurrentView) {
         super(windowSize, cantordust, mainInterface);
+        registerLiveInstance();
         data = mainInterface.getData();
         dataWidthSlider = mainInterface.widthSlider;
         createPopupMenu(frame);
@@ -83,15 +92,37 @@ public class MetricMap extends Visualizer{
         draw();
     }
 
+    private void registerLiveInstance() {
+        LIVE_INSTANCES.add(this);
+        addHierarchyListener(event -> {
+            if((event.getChangeFlags() & HierarchyEvent.DISPLAYABILITY_CHANGED) != 0 && !isDisplayable()) {
+                LIVE_INSTANCES.remove(MetricMap.this);
+            }
+        });
+    }
+
+    public static void requestRenderAll() {
+        for(MetricMap metricMap : LIVE_INSTANCES) {
+            if(metricMap != null) {
+                metricMap.requestRender();
+            }
+        }
+    }
+
     @Override
     public void paintComponent(Graphics g) {
         super.paintComponent(g);
+        Graphics2D g2 = (Graphics2D) g.create();
         if(renderedImage != null) {
-            g.drawImage(renderedImage, 0, 0, getWidth(), getHeight(), null);
+            // Keep byte blocks visually discrete when scaling.
+            g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF);
+            g2.drawImage(renderedImage, 0, 0, getWidth(), getHeight(), null);
         }
         if(guidePathEnabled && renderedGuideOverlay != null) {
-            g.drawImage(renderedGuideOverlay, 0, 0, getWidth(), getHeight(), null);
+            g2.drawImage(renderedGuideOverlay, 0, 0, getWidth(), getHeight(), null);
         }
+        g2.dispose();
     }
 
     public void sliderConfig(){
@@ -207,11 +238,7 @@ public class MetricMap extends Visualizer{
                     }
                     int loc = lookupMap.index(p);
                     updateGuideFocus(lookupMap, loc, e.getID() == MouseEvent.MOUSE_PRESSED);
-                    HashMap<Integer, Integer> memLocSnapshot = memLoc;
-                    Integer relativeLocation = memLocSnapshot.get(loc);
-                    if(relativeLocation == null) {
-                        return;
-                    }
+                    int relativeLocation = mapIndexToRelativeLocation(loc);
                     int memoryLocation = memLocBaseOffset + relativeLocation;
                     long minGhidraAddress = Long.parseLong(cantordust.getCurrentProgram().getMinAddress().toString(false), 16);
                     String currentAddress = Long.toHexString(minGhidraAddress+(long)memoryLocation).toUpperCase();
@@ -273,70 +300,151 @@ public class MetricMap extends Visualizer{
         int mapHeight = lookupMap != null ? lookupMap.dimensions().get(1) : size_hilbert;
         return Math.max(0, Math.min(mapHeight - 1, (int)Math.floor((viewY * (double)mapHeight) / Math.max(1, getHeight()))));
     }
+
+    private int mapIndexToRelativeLocation(int mapIndex) {
+        int sourceLength = Math.max(1, renderSourceLength);
+        int mapLength = Math.max(1, renderMapLength);
+        int clampedMapIndex = Math.max(0, Math.min(mapLength - 1, mapIndex));
+        int relativeLocation = (int)(((long)clampedMapIndex * (long)sourceLength) / (long)mapLength);
+        if(relativeLocation >= sourceLength) {
+            relativeLocation = sourceLength - 1;
+        }
+        return Math.max(0, relativeLocation);
+    }
+
+    private static class RenderDataWindow {
+        private final byte[] data;
+        private final int rangeStart;
+        private final int rangeLength;
+        private final int dataWindowBaseOffset;
+
+        private RenderDataWindow(byte[] data, int rangeStart, int rangeLength, int dataWindowBaseOffset) {
+            this.data = data;
+            this.rangeStart = rangeStart;
+            this.rangeLength = rangeLength;
+            this.dataWindowBaseOffset = dataWindowBaseOffset;
+        }
+    }
+
+    private static class PointCache {
+        private final Scurve mapRef;
+        private final int width;
+        private final int height;
+        private final int length;
+        private final int[] pointX;
+        private final int[] pointY;
+
+        private PointCache(Scurve mapRef, int width, int height, int length, int[] pointX, int[] pointY) {
+            this.mapRef = mapRef;
+            this.width = width;
+            this.height = height;
+            this.length = length;
+            this.pointX = pointX;
+            this.pointY = pointY;
+        }
+    }
+
+    private static class SourceOffsetCache {
+        private final int mapLength;
+        private final int sourceLength;
+        private final int[] offsets;
+
+        private SourceOffsetCache(int mapLength, int sourceLength, int[] offsets) {
+            this.mapLength = mapLength;
+            this.sourceLength = sourceLength;
+            this.offsets = offsets;
+        }
+    }
     
     public byte[] getCurrentData(){
-        int lowerBound = dataMicroSlider.getValue();
-        int upperBound = dataMicroSlider.getUpperValue();
-        byte[] currentData = new byte[upperBound-lowerBound];
-        // this.cantordust.cdprint(String.format("%d %d\n", lowerBound, upperBound));
-        for(int i=lowerBound; i <= upperBound-2; i++) {
-            currentData[i-lowerBound] = data[i];
+        byte[] sourceData = mainInterface.getData();
+        if(sourceData == null || sourceData.length == 0) {
+            return new byte[0];
         }
-        return currentData;
+        data = sourceData;
+
+        int lowerBound = Math.max(0, Math.min(dataMicroSlider.getValue(), sourceData.length - 1));
+        int upperBound = Math.max(lowerBound + 1, Math.min(dataMicroSlider.getUpperValue(), sourceData.length));
+        int length = Math.max(1, upperBound - lowerBound);
+        if(reusableCurrentDataBuffer.length != length) {
+            reusableCurrentDataBuffer = new byte[length];
+        }
+        System.arraycopy(sourceData, lowerBound, reusableCurrentDataBuffer, 0, Math.min(length, sourceData.length - lowerBound));
+        return reusableCurrentDataBuffer;
     }
 
-    private int getCurrentDataBaseOffset() {
-        int baseOffset = dataMicroSlider.getValue();
-        if(dataRangeSlider != null) {
-            baseOffset += dataRangeSlider.getValue();
+    private RenderDataWindow getCurrentRenderDataWindow() {
+        byte[] sourceData = mainInterface.getData();
+        if(sourceData == null || sourceData.length == 0) {
+            return new RenderDataWindow(EMPTY_BYTES, 0, 0, 0);
         }
-        return Math.max(0, baseOffset);
+
+        int lowerBound = Math.max(0, Math.min(dataMicroSlider.getValue(), sourceData.length - 1));
+        int upperBound = Math.max(lowerBound + 1, Math.min(dataMicroSlider.getUpperValue(), sourceData.length));
+        int rangeLength = Math.max(1, upperBound - lowerBound);
+        int windowOffset = dataRangeSlider != null ? dataRangeSlider.getValue() : 0;
+        return new RenderDataWindow(sourceData, lowerBound, rangeLength, Math.max(0, windowOffset));
     }
 
-    private Scurve getRenderMapForCurrentState(Scurve activeMap) {
+    private boolean isInteractiveSliderAdjustment() {
+        return dataMacroSlider.getValueIsAdjusting()
+                || dataMicroSlider.getValueIsAdjusting()
+                || (dataRangeSlider != null && dataRangeSlider.getValueIsAdjusting());
+    }
+
+    private PointCache getOrBuildPointCache(Scurve activeMap) {
         if(activeMap == null) {
             return null;
         }
-        if(!mainInterface.isPlaybackActive()) {
-            return activeMap;
+        PointCache cache = cachedPointCache;
+        int mapLength = activeMap.getLength();
+        if(cache != null && cache.mapRef == activeMap && cache.length == mapLength) {
+            return cache;
         }
 
-        double playbackSize = Math.pow(PLAYBACK_RENDER_SIZE, 2);
-        try {
-            if(activeMap.isType("hilbert")) {
-                if(playbackHilbertMap == null) {
-                    playbackHilbertMap = new Hilbert(cantordust, 2, playbackSize);
-                }
-                return playbackHilbertMap;
+        synchronized(pointCacheLock) {
+            cache = cachedPointCache;
+            if(cache != null && cache.mapRef == activeMap && cache.length == mapLength) {
+                return cache;
             }
-            if(activeMap.isType("zorder")) {
-                if(playbackZorderMap == null) {
-                    playbackZorderMap = new Zorder(cantordust, 2, playbackSize);
-                }
-                return playbackZorderMap;
+            TwoIntegerTuple dimensions = activeMap.dimensions();
+            int width = dimensions.get(0);
+            int height = dimensions.get(1);
+            int[] pointX = new int[mapLength];
+            int[] pointY = new int[mapLength];
+            for(int i = 0; i < mapLength; i++) {
+                TwoIntegerTuple p = (TwoIntegerTuple)activeMap.point(i);
+                pointX[i] = p.get(0);
+                pointY[i] = p.get(1);
             }
-            if(activeMap.isType("hcurve")) {
-                if(playbackHcurveMap == null) {
-                    playbackHcurveMap = new HCurve(cantordust, 2, playbackSize);
-                }
-                return playbackHcurveMap;
-            }
-            if(activeMap.isType("linear")) {
-                if(playbackLinearMap == null) {
-                    playbackLinearMap = new Linear(cantordust, 2, playbackSize);
-                }
-                int sourceWidth = Math.max(1, activeMap.getWidth());
-                int sourceHeight = Math.max(1, activeMap.getHeight());
-                int reference = Math.max(sourceWidth, sourceHeight);
-                double scale = (double)PLAYBACK_RENDER_SIZE / (double)Math.max(1, reference);
-                playbackLinearMap.setWidth(Math.max(1, (int)Math.round(sourceWidth * scale)));
-                playbackLinearMap.setHeight(Math.max(1, (int)Math.round(sourceHeight * scale)));
-                return playbackLinearMap;
-            }
-        } catch(RuntimeException ignored) {
-            return activeMap;
+            cache = new PointCache(activeMap, width, height, mapLength, pointX, pointY);
+            cachedPointCache = cache;
+            return cache;
         }
+    }
 
+    private int[] getOrBuildSourceOffsets(int mapLength, int sourceLength) {
+        SourceOffsetCache cache = cachedSourceOffsetCache;
+        if(cache != null && cache.mapLength == mapLength && cache.sourceLength == sourceLength) {
+            return cache.offsets;
+        }
+        synchronized(sourceOffsetCacheLock) {
+            cache = cachedSourceOffsetCache;
+            if(cache != null && cache.mapLength == mapLength && cache.sourceLength == sourceLength) {
+                return cache.offsets;
+            }
+            int[] offsets = new int[mapLength];
+            int denominator = Math.max(1, mapLength);
+            for(int i = 0; i < mapLength; i++) {
+                int offset = (int)(((long)i * (long)sourceLength) / (long)denominator);
+                offsets[i] = Math.max(0, Math.min(sourceLength - 1, offset));
+            }
+            cachedSourceOffsetCache = new SourceOffsetCache(mapLength, sourceLength, offsets);
+            return offsets;
+        }
+    }
+
+    private Scurve getRenderMapForCurrentState(Scurve activeMap) {
         return activeMap;
     }
 
@@ -745,6 +853,7 @@ public class MetricMap extends Visualizer{
         }
         synchronized(drawMonitor) {
             redrawRequested = true;
+            drawRequestVersion++;
             if(drawInProgress) {
                 return;
             }
@@ -753,46 +862,53 @@ public class MetricMap extends Visualizer{
 
         drawExecutor.execute(() -> {
             while(true) {
+                long requestVersion;
                 synchronized(drawMonitor) {
                     if(!redrawRequested) {
                         drawInProgress = false;
                         break;
                     }
                     redrawRequested = false;
+                    requestVersion = drawRequestVersion;
                 }
-                renderCurrentState();
+                renderCurrentState(requestVersion);
             }
         });
     }
 
-    private void renderCurrentState() {
-        byte[] currentData = getCurrentData();
-        if(currentData.length == 0) {
+    public void requestRender() {
+        draw();
+    }
+
+    private void renderCurrentState(long requestVersion) {
+        RenderDataWindow renderDataWindow = getCurrentRenderDataWindow();
+        if(renderDataWindow.rangeLength <= 0 || renderDataWindow.data.length == 0) {
             return;
         }
-        int currentDataBaseOffset = getCurrentDataBaseOffset();
+        int currentDataBaseOffset = renderDataWindow.dataWindowBaseOffset + renderDataWindow.rangeStart;
 
         ColorSource activeSource = this.csource;
         Scurve activeMap = this.map;
         String activePlotType = this.type_plot;
+        boolean interactiveSliderAdjustment = isInteractiveSliderAdjustment();
         Scurve renderMap = getRenderMapForCurrentState(activeMap);
         if(renderMap == null) {
             return;
         }
 
-        activeSource.setData(currentData);
+        activeSource.setData(renderDataWindow.data);
         if(activeSource instanceof ColorClassifierPrediction) {
-            ((ColorClassifierPrediction) activeSource).setBaseOffset(currentDataBaseOffset);
+            ((ColorClassifierPrediction) activeSource).setBaseOffset(renderDataWindow.dataWindowBaseOffset);
         }
 
         if(activePlotType.equals("unrolled")) {
             drawMap_unrolled(renderMap.type, size_hilbert, activeSource/*, dst, prog*/);
         } else if(activePlotType.equals("square")) {
-            drawMap_square(renderMap, activeSource, currentDataBaseOffset/*, dst, prog*/);
+            drawMap_square(renderMap, activeSource, currentDataBaseOffset, requestVersion, interactiveSliderAdjustment, renderDataWindow.rangeStart, renderDataWindow.rangeLength/*, dst, prog*/);
         }
     }
 
-    public void drawMap_square(Scurve activeMap, ColorSource activeSource, int dataBaseOffset/*, String name, prog */) {
+    public void drawMap_square(Scurve activeMap, ColorSource activeSource, int dataBaseOffset, long requestVersion, boolean interactiveSliderAdjustment, int sourceRangeStart, int sourceRangeLength/*, String name, prog */) {
         // prog.set_target(Math.pow(size, 2))
         // if(this.map.isType("hilbert")){
         //     cantordust.cdprint("")
@@ -800,32 +916,47 @@ public class MetricMap extends Visualizer{
         // } else if (this.map.isType("zigzag")){
         //     this.map = new ZigZag(this.cantordust, 2, (double)getWindowSize());
         // }
-        TwoIntegerTuple dimensions = activeMap.dimensions();
-        int width = dimensions.get(0);
-        int height = dimensions.get(1);
-        int[] nextPixelMap1D = new int[height * width * 3];
-        int mapLength = activeMap.getLength();
-        int memLocCapacity = Math.max(16, (int)(mapLength / 0.75f) + 1);
-        HashMap<Integer, Integer> nextMemLoc = new HashMap<Integer, Integer>(memLocCapacity);
-        BufferedImage guideOverlay = getGuideOverlayForMap(activeMap);
+        PointCache pointCache = getOrBuildPointCache(activeMap);
+        if(pointCache == null) {
+            return;
+        }
+        int width = pointCache.width;
+        int height = pointCache.height;
+        int mapLength = pointCache.length;
+        int[] nextPixelMap1D = new int[height * width];
+        boolean playbackActive = mainInterface.isPlaybackActive();
+        BufferedImage guideOverlay = (interactiveSliderAdjustment || playbackActive) ? null : getGuideOverlayForMap(activeMap);
 
-        int sourceLength = Math.max(1, activeSource.getLength());
-        float step = (float)sourceLength / (float)Math.max(1, mapLength);
+        int sourceDataLength = Math.max(1, activeSource.getLength());
+        int sourceRangeLow = Math.max(0, Math.min(sourceRangeStart, sourceDataLength - 1));
+        int sourceLength = Math.max(1, Math.min(sourceRangeLength, sourceDataLength - sourceRangeLow));
+        int[] sourceOffsets = getOrBuildSourceOffsets(mapLength, sourceLength);
         int lastSourceIndex = -1;
-        Rgb cachedColor = null;
+        int cachedColorArgb = 0xFF000000;
+        boolean allowEarlyCancel = interactiveSliderAdjustment
+                || (playbackActive && (System.currentTimeMillis() - lastRenderPublishMs) < 20L);
+        int cancelMask = 63;
         for(int i=0; i<mapLength; i++){
-            TwoIntegerTuple p = (TwoIntegerTuple)activeMap.point(i);
-            int sourceIndex = Math.max(0, Math.min(sourceLength - 1, (int)(i * step)));
-            if(sourceIndex != lastSourceIndex || cachedColor == null) {
-                cachedColor = activeSource.point(sourceIndex);
+            if(allowEarlyCancel && (i & cancelMask) == 0 && requestVersion != drawRequestVersion) {
+                return;
+            }
+            int sourceIndex = sourceRangeLow + sourceOffsets[i];
+            if(sourceIndex != lastSourceIndex) {
+                cachedColorArgb = activeSource.pointArgb(sourceIndex);
                 lastSourceIndex = sourceIndex;
             }
-            add1DPixel(nextPixelMap1D, width, p, cachedColor);
-            nextMemLoc.put(i, sourceIndex);
+            int pixelIndex = pointCache.pointY[i] * width + pointCache.pointX[i];
+            if(pixelIndex >= 0 && pixelIndex < nextPixelMap1D.length) {
+                nextPixelMap1D[pixelIndex] = cachedColorArgb;
+            }
+        }
+
+        if(allowEarlyCancel && requestVersion != drawRequestVersion) {
+            return;
         }
 
         //c.save(name);
-        plotMap(dimensions, nextPixelMap1D, nextMemLoc, dataBaseOffset, activeMap, guideOverlay);
+        plotMap(new TwoIntegerTuple(width, height), nextPixelMap1D, dataBaseOffset, activeMap, guideOverlay, sourceLength, mapLength);
     }
 
     public void drawMap_unrolled(String map_type, int size, ColorSource csource/*, String name, prog */) {
@@ -857,23 +988,6 @@ public class MetricMap extends Visualizer{
         targetPixelMap[y][x+2] = color.b;
     }
 
-    private void add1DPixel(int[] targetPixelMap, int width, TwoIntegerTuple point, Rgb color) {
-        int pixelIndex = (point.get(1) * width + point.get(0)) * 3;
-        if(pixelIndex < 0 || (pixelIndex + 2) >= targetPixelMap.length) {
-            return;
-        }
-        targetPixelMap[pixelIndex] = color.r;
-        targetPixelMap[pixelIndex + 1] = color.g;
-        targetPixelMap[pixelIndex + 2] = color.b;
-    }
-
-    public void addMemLoc(int idx, int rloc) {
-        /*
-        adds Memory relative memory location to XY coordinate
-        */
-        this.memLoc.put(idx, rloc);
-    }
-    
     public void flip2DPixlMap(TwoIntegerTuple dimensions){
         /*
         flips every other row in pixels to fit raster image
@@ -930,19 +1044,21 @@ public class MetricMap extends Visualizer{
         // panel.add( createImageLabel(this.pixelMap1D, width, height) );
         // panel.revalidate();
         // panel.repaint();
-        plotMap(dimensions, this.pixelMap1D, this.memLoc, this.memLocBaseOffset, this.renderLookupMap, this.renderedGuideOverlay);
+        plotMap(dimensions, this.pixelMap1D, this.memLocBaseOffset, this.renderLookupMap, this.renderedGuideOverlay, this.renderSourceLength, this.renderMapLength);
     }
 
-    private void plotMap(TwoIntegerTuple dimensions, int[] pixels, HashMap<Integer, Integer> nextMemLoc, int nextBaseOffset, Scurve nextLookupMap, BufferedImage nextGuideOverlay){
+    private void plotMap(TwoIntegerTuple dimensions, int[] pixels, int nextBaseOffset, Scurve nextLookupMap, BufferedImage nextGuideOverlay, int nextSourceLength, int nextMapLength){
         int width = dimensions.get(0);
         int height = dimensions.get(1);
-        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
-        WritableRaster raster = image.getRaster();
-        raster.setPixels(0, 0, width, height, pixels);
+        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        int[] targetPixels = ((DataBufferInt)image.getRaster().getDataBuffer()).getData();
+        System.arraycopy(pixels, 0, targetPixels, 0, Math.min(targetPixels.length, pixels.length));
 
         SwingUtilities.invokeLater(() -> {
             this.memLocBaseOffset = nextBaseOffset;
-            this.memLoc = nextMemLoc;
+            this.renderSourceLength = Math.max(1, nextSourceLength);
+            this.renderMapLength = Math.max(1, nextMapLength);
+            this.lastRenderPublishMs = System.currentTimeMillis();
             this.renderLookupMap = nextLookupMap;
             this.renderedImage = image;
             this.renderedGuideOverlay = nextGuideOverlay;
@@ -954,10 +1070,9 @@ public class MetricMap extends Visualizer{
     {
         // int change = size_hilbert - (int)((width - size_hilbert)/2);
         // cantordust.cdprint("ch: "+change+"\n");
-        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
-        // cantordust.cdprint("w: "+width+"\nh: "+height+"\n");
-        WritableRaster raster = image.getRaster();
-        raster.setPixels(0, 0, width, height, pixels);
+        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        int[] targetPixels = ((DataBufferInt)image.getRaster().getDataBuffer()).getData();
+        System.arraycopy(pixels, 0, targetPixels, 0, Math.min(targetPixels.length, pixels.length));
         return new JLabel( new ImageIcon(image) );
     }
 

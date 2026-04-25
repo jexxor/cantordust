@@ -104,7 +104,7 @@ public class DataPlaybackController {
     }
 
     public void setIntervalMs(int intervalMs) {
-        int safeDelay = Math.max(5, intervalMs);
+        int safeDelay = Math.max(1, intervalMs);
         playbackTimer.setDelay(safeDelay);
         playbackTimer.setInitialDelay(0);
     }

@@ -17,4 +17,14 @@ public class Color8bpp extends ColorSource { /* see binvis - ColorHilbert class 
         int unsignedByte = data[clampedX] & 0xFF;
         return new Rgb(0, unsignedByte, 0);
     }
+
+    @Override
+    public int pointArgb(int x) {
+        if(data == null || data.length == 0) {
+            return 0xFF000000;
+        }
+        int clampedX = Math.max(0, Math.min(x, data.length - 1));
+        int unsignedByte = data[clampedX] & 0xFF;
+        return (0xFF << 24) | (unsignedByte << 8);
+    }
 }

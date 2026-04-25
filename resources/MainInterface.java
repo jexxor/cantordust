@@ -19,6 +19,8 @@ import java.awt.Insets;
 import java.lang.reflect.InvocationTargetException;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class MainInterface extends JPanel {
     private static final int DATA_WINDOW_UPDATE_THROTTLE_MS = 16;
@@ -86,6 +88,11 @@ public class MainInterface extends JPanel {
     protected Boolean dispMetricMap;
     private DataPlaybackController dataPlaybackController;
     private final Object dataWindowUpdateLock = new Object();
+    private final ExecutorService dataWindowExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread worker = new Thread(r, "cantordust-data-window");
+        worker.setDaemon(true);
+        return worker;
+    });
     private boolean dataWindowUpdateInProgress = false;
     private int pendingDataWindowStart = 0;
     private long pendingDataWindowRequestId = 0L;
@@ -105,6 +112,8 @@ public class MainInterface extends JPanel {
 
         setBorder(BorderFactory.createEmptyBorder(6, 6, 6, 6));
         setLayout(new GridBagLayout());
+        setPreferredSize(new Dimension(getWindowWidth(), getWindowHeight()));
+        setMinimumSize(new Dimension(900, 620));
         GridBagConstraints gbc = new GridBagConstraints();
 
         if(fullData.length > 26214400){
@@ -534,7 +543,7 @@ public class MainInterface extends JPanel {
 
         playbackTargetLabel.setText("Slider");
         playbackStepSpinner = new JSpinner(new SpinnerNumberModel(64, 1, DATA_WINDOW_SIZE, 1));
-        playbackIntervalSpinner = new JSpinner(new SpinnerNumberModel(40, 10, 1000, 5));
+        playbackIntervalSpinner = new JSpinner(new SpinnerNumberModel(40, 1, 1000, 1));
         playbackStepLabel.setText("Step");
         playbackIntervalLabel.setText("ms");
 
@@ -583,11 +592,11 @@ public class MainInterface extends JPanel {
     }*/
     
     public static int getWindowWidth() {
-        return 900;
+        return 1180;
     }
 
     public static int getWindowHeight() {
-        return 645;
+        return 780;
     }
 
     public byte[] getData() {
@@ -785,9 +794,7 @@ public class MainInterface extends JPanel {
             dataWindowUpdateInProgress = true;
         }
 
-        Thread worker = new Thread(() -> drainPendingDataWindowUpdates(), "cantordust-data-window");
-        worker.setDaemon(true);
-        worker.start();
+        dataWindowExecutor.execute(() -> drainPendingDataWindowUpdates());
     }
 
     private void drainPendingDataWindowUpdates() {
@@ -865,6 +872,11 @@ public class MainInterface extends JPanel {
         if(microSlider.ui != null) {
             microSlider.ui.makeBitmapAsync(macroSlider.getValue(), macroSlider.getUpperValue());
         }
+        requestMetricMapRefresh();
+    }
+
+    private void requestMetricMapRefresh() {
+        MetricMap.requestRenderAll();
     }
 
     private GridBagConstraints buildVisualizerConstraints() {
