@@ -62,7 +62,7 @@ The fork now includes all fixes and features tracked in [`CHANGELOG.md`](CHANGEL
 - Color sources now expose a direct ARGB fast path; Metric Map consumes it to avoid per-pixel `Rgb` allocation.
 - Entropy shading was rewritten with reusable histogram buffers (no per-pixel histogram allocations).
 - Runtime `Interpolation` toggle was added in Metric Map and Linear Bitmap popup menus.
-- Metric Map now supports drag selection (left-drag with threshold) and reports selected area size (`width x height`, cells, estimated bytes) via popup.
+- Metric Map now supports drag selection (`Shift+left-drag` with threshold) and reports selected area size (`width x height`, cells, estimated bytes) via popup.
 
 ## Installation and Setup
 

@@ -53,6 +53,7 @@ public class MetricMap extends Visualizer{
     private int selectionStartViewY = -1;
     private int selectionCurrentViewX = -1;
     private int selectionCurrentViewY = -1;
+    private boolean selectionArmed = false;
     private boolean primaryPressActive = false;
     private int primaryPressViewX = -1;
     private int primaryPressViewY = -1;
@@ -205,13 +206,15 @@ public class MetricMap extends Visualizer{
                 int b1 = MouseEvent.BUTTON1_DOWN_MASK;
                 int b2 = MouseEvent.BUTTON2_DOWN_MASK;
                 if ((e.getModifiersEx() & (b1 | b2)) == b1) {
-                    if(selectionDragActive) {
-                        updateSelection(e);
-                        return;
-                    }
-                    if(primaryPressActive && hasMovedEnoughForSelection(e.getX(), e.getY())) {
-                        beginSelection(primaryPressViewX, primaryPressViewY);
-                        updateSelection(e);
+                    if(selectionArmed) {
+                        if(selectionDragActive) {
+                            updateSelection(e);
+                            return;
+                        }
+                        if(primaryPressActive && hasMovedEnoughForSelection(e.getX(), e.getY())) {
+                            beginSelection(primaryPressViewX, primaryPressViewY);
+                            updateSelection(e);
+                        }
                         return;
                     }
                     if(guidePathEnabled) {
@@ -251,6 +254,12 @@ public class MetricMap extends Visualizer{
                         primaryPressActive = true;
                         primaryPressViewX = clampViewX(e.getX());
                         primaryPressViewY = clampViewY(e.getY());
+                        selectionArmed = isSelectionGesture(e);
+                    }
+                    if(selectionArmed) {
+                        hideAddressPopup();
+                        hideSelectionPopup();
+                        return;
                     }
                     JPanel bv = MetricMap.this;
                     JFrame metricMap = frame;
@@ -315,11 +324,13 @@ public class MetricMap extends Visualizer{
                     primaryPressActive = false;
                     primaryPressViewX = -1;
                     primaryPressViewY = -1;
+                    selectionArmed = false;
                     return;
                 }
                 primaryPressActive = false;
                 primaryPressViewX = -1;
                 primaryPressViewY = -1;
+                selectionArmed = false;
                 hideAddressPopup();
                 if(e.getButton() == 3){
                     popupMenu.show(frame, MetricMap.this.getX() + e.getX(), MetricMap.this.getY() + e.getY());
@@ -357,6 +368,10 @@ public class MetricMap extends Visualizer{
 
     private int clampViewY(int y) {
         return Math.max(0, Math.min(Math.max(0, getHeight() - 1), y));
+    }
+
+    private boolean isSelectionGesture(MouseEvent e) {
+        return (e.getModifiersEx() & InputEvent.SHIFT_DOWN_MASK) != 0;
     }
 
     private boolean hasMovedEnoughForSelection(int viewX, int viewY) {
