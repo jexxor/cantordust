@@ -22,6 +22,7 @@ import javax.swing.SwingUtilities;
  */
 class BitMapSliderUI extends RangeSliderUI {
     private volatile BufferedImage img;
+    private final BitMapSlider ownerSlider;
     private final Object bitmapRequestLock = new Object();
     private final ExecutorService bitmapExecutor = Executors.newSingleThreadExecutor(r -> {
         Thread worker = new Thread(r, "cantordust-slider-bitmap");
@@ -35,9 +36,14 @@ class BitMapSliderUI extends RangeSliderUI {
 
     public BitMapSliderUI(BitMapSlider b) {
         super(b);
+        this.ownerSlider = b;
         SwingUtilities.invokeLater(() -> {
-            int low = ((BitMapSlider) this.slider).getValue() - 1;
-            int high = ((BitMapSlider) this.slider).getUpperValue();
+            BitMapSlider sliderRef = this.ownerSlider;
+            if(sliderRef == null) {
+                return;
+            }
+            int low = sliderRef.getValue() - 1;
+            int high = sliderRef.getUpperValue();
             makeBitmapAsync(low, high);
         });
     }
@@ -75,6 +81,9 @@ class BitMapSliderUI extends RangeSliderUI {
      * Makes a bitmap in a new thread, this makes it so updating the slider does not cause everything else to hang
      */
     public void makeBitmapAsync(int low, int high) {
+        if(ownerSlider == null) {
+            return;
+        }
         synchronized(bitmapRequestLock) {
             pendingLow = low;
             pendingHigh = high;
@@ -89,6 +98,13 @@ class BitMapSliderUI extends RangeSliderUI {
 
     private void processBitmapRequests() {
         while(true) {
+            BitMapSlider sliderRef = ownerSlider;
+            if(sliderRef == null) {
+                synchronized(bitmapRequestLock) {
+                    bitmapWorkerRunning = false;
+                }
+                return;
+            }
             int low;
             int high;
             synchronized(bitmapRequestLock) {
@@ -96,8 +112,8 @@ class BitMapSliderUI extends RangeSliderUI {
                 high = pendingHigh;
             }
 
-            if(((BitMapSlider) this.slider).data != null) {
-                makeBitmap(low, high);
+            if(sliderRef.data != null) {
+                makeBitmap(sliderRef, low, high);
             }
 
             synchronized(bitmapRequestLock) {
@@ -112,8 +128,10 @@ class BitMapSliderUI extends RangeSliderUI {
     /**
      * Code that actually makes the bitmap
      */
-    private void makeBitmap(int low, int high) {
-        BitMapSlider bitMapSlider = (BitMapSlider) this.slider;
+    private void makeBitmap(BitMapSlider bitMapSlider, int low, int high) {
+        if(bitMapSlider == null) {
+            return;
+        }
         MainInterface mainInterface = bitMapSlider.cd != null ? bitMapSlider.cd.getMainInterface() : null;
         byte[] data = bitMapSlider.data;
         if(data == null || data.length == 0) {
@@ -151,7 +169,12 @@ class BitMapSliderUI extends RangeSliderUI {
         }
         img.setRGB(0, 0, width, height, bitmapPixels, 0, width);
 
-        SwingUtilities.invokeLater(() -> this.slider.repaint());
+        SwingUtilities.invokeLater(() -> {
+            JSlider sliderRef = this.slider != null ? this.slider : ownerSlider;
+            if(sliderRef != null) {
+                sliderRef.repaint();
+            }
+        });
     }
 
     /**
@@ -260,7 +283,11 @@ class BitMapSliderUI extends RangeSliderUI {
                 int newVal = valueForYPosition(thumbMiddle);
                 newVal = Math.max(slider.getMinimum(), Math.min(newVal, maxStart));
                 if(newVal != lastWindowSlideValue) {
-                    ((BitMapSlider)slider).getModel().setRangeProperties(newVal, extent, slider.getMinimum(),
+                    BitMapSlider sliderRef = ownerSlider;
+                    if(sliderRef == null) {
+                        return;
+                    }
+                    sliderRef.getModel().setRangeProperties(newVal, extent, slider.getMinimum(),
                             slider.getMaximum(), true);
                     calculateThumbLocation();
                     slider.repaint();
@@ -275,7 +302,13 @@ class BitMapSliderUI extends RangeSliderUI {
                 int extent = windowSlideExtent > 0 ? windowSlideExtent : Math.max(1, slider.getExtent());
                 int maxStart = Math.max(slider.getMinimum(), slider.getMaximum() - extent);
                 int newVal = Math.max(slider.getMinimum(), Math.min(slider.getValue(), maxStart));
-                ((BitMapSlider)slider).getModel().setRangeProperties(newVal, extent, slider.getMinimum(),
+                BitMapSlider sliderRef = ownerSlider;
+                if(sliderRef == null) {
+                    windowSliding = false;
+                    windowSlideExtent = -1;
+                    return;
+                }
+                sliderRef.getModel().setRangeProperties(newVal, extent, slider.getMinimum(),
                         slider.getMaximum(), false);
                 windowSliding = false;
                 windowSlideExtent = -1;
@@ -300,7 +333,11 @@ class BitMapSliderUI extends RangeSliderUI {
             upperDragging = false;
             slider.setValueIsAdjusting(false);
             slider.setCursor(new Cursor(Cursor.HAND_CURSOR));
-            BitMapSlider currentSlider = (BitMapSlider) slider;
+            BitMapSlider currentSlider = ownerSlider;
+            if(currentSlider == null) {
+                super.mouseReleased(e);
+                return;
+            }
             MainInterface mainInterface = currentSlider.cd != null ? currentSlider.cd.getMainInterface() : null;
             if(mainInterface != null && currentSlider == mainInterface.macroSlider && mainInterface.microSlider != null
                     && mainInterface.microSlider.getUI() instanceof BitMapSliderUI) {
