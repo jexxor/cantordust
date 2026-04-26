@@ -48,3 +48,7 @@
 - Removed experimental rectangular region bookmarks for now to prioritize stability; point bookmarks and area-size selection remain supported.
 - Removed naive linear `minAddress + offset` address display math and switched popup/slider address text to memory-block-aware Ghidra mapping.
 - Fixed file-offset-to-address conversion boundary handling (`offset == 0`) and hardened `gotoFileAddress` null safety.
+- Coverage indicator was moved from the Metric Map overlay into the main window bottom-right status area and simplified to a direct `Coverage: N addr` display.
+- Fixed macro/micro range drift after EOF round-trips by preserving intended micro-slider span during macro-window remaps instead of repeatedly shrinking via lossy ratio remapping.
+- Removed visualizer-side slider model mutation (`setMinimum`/`setMaximum` during render capture), so rendering no longer silently clamps or shrinks range slider coverage.
+- Fixed between-thumbs slider drag finalization to preserve extent on mouse release and clamp by model bounds, restoring reliable coverage of top/bottom edge bytes.

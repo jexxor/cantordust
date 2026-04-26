@@ -234,14 +234,15 @@ public class BitMapVisualizer extends Visualizer {
         final byte[][] dataHolder = new byte[1][];
 
         Runnable captureState = () -> {
-            dataMicroSlider.setMinimum(dataMacroSlider.getValue());
-            dataMicroSlider.setMaximum(dataMacroSlider.getUpperValue());
-
             byte[] currentData = mainInterface.getData();
             dataHolder[0] = currentData;
             int dataLength = currentData.length;
-            int low = Math.max(0, Math.min(dataMicroSlider.getValue(), Math.max(0, dataLength - 1)));
-            int high = Math.max(low + 1, Math.min(dataMicroSlider.getUpperValue(), dataLength));
+            int macroLow = dataMacroSlider.getValue();
+            int macroHigh = dataMacroSlider.getUpperValue();
+            int sliderLow = Math.max(macroLow, dataMicroSlider.getValue());
+            int sliderHigh = Math.min(macroHigh, dataMicroSlider.getUpperValue());
+            int low = Math.max(0, Math.min(sliderLow, Math.max(0, dataLength - 1)));
+            int high = Math.max(low + 1, Math.min(sliderHigh, dataLength));
 
             renderBounds[0] = low;
             renderBounds[1] = high;

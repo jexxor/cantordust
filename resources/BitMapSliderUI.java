@@ -237,6 +237,7 @@ class BitMapSliderUI extends RangeSliderUI {
         private boolean windowSliding;
         private double previousY;
         private int lastWindowSlideValue = Integer.MIN_VALUE;
+        private int windowSlideExtent = -1;
 
         private boolean isBetweenThumbs(int x, int y) {
             if(thumbRect.contains(x, y) || upperThumbRect.contains(x, y)) {
@@ -252,31 +253,32 @@ class BitMapSliderUI extends RangeSliderUI {
                 double diff = previousY - e.getY();
                 double oldY = previousY;
                 previousY = e.getY();
-                int upperThumbRectNewY = (int)(upperThumbRect.getY() - diff);
                 int thumbRectNewY = (int)(thumbRect.getY() - diff);
-                if(upperThumbRectNewY <= yPositionForValue(slider.getMaximum()) && thumbRectNewY >= yPositionForValue(slider.getMinimum())) {
-                    upperThumbRect.setLocation((int)(upperThumbRect.getX()), upperThumbRectNewY);
-                    thumbRect.setLocation((int)(thumbRect.getX()), thumbRectNewY);
-                    int thumbMiddle = thumbRectNewY + (thumbRect.height / 2);
-                    int newVal = valueForYPosition(thumbMiddle);
-                    if(newVal != lastWindowSlideValue) {
-                        ((BitMapSlider)slider).getModel().setRangeProperties(newVal, slider.getExtent(), slider.getMinimum(),
-                                slider.getMaximum(), true);
-                        lastWindowSlideValue = newVal;
-                    }
+                int thumbMiddle = thumbRectNewY + (thumbRect.height / 2);
+                int extent = windowSlideExtent > 0 ? windowSlideExtent : Math.max(1, slider.getExtent());
+                int maxStart = Math.max(slider.getMinimum(), slider.getMaximum() - extent);
+                int newVal = valueForYPosition(thumbMiddle);
+                newVal = Math.max(slider.getMinimum(), Math.min(newVal, maxStart));
+                if(newVal != lastWindowSlideValue) {
+                    ((BitMapSlider)slider).getModel().setRangeProperties(newVal, extent, slider.getMinimum(),
+                            slider.getMaximum(), true);
+                    calculateThumbLocation();
                     slider.repaint();
-                    slider.setCursor(new Cursor(e.getY() > oldY ? Cursor.S_RESIZE_CURSOR: Cursor.N_RESIZE_CURSOR));
+                    lastWindowSlideValue = newVal;
                 }
+                slider.setCursor(new Cursor(e.getY() > oldY ? Cursor.S_RESIZE_CURSOR: Cursor.N_RESIZE_CURSOR));
             }
         }
 
         private void updateValuesForSlidingWindow(MouseEvent e) {
             if(windowSliding) {
-                int thumbMiddle = (int)(thumbRect.getY() + (thumbRect.getHeight() / 2.0));
-                int newVal = valueForYPosition(thumbMiddle);
-                ((BitMapSlider)slider).getModel().setRangeProperties(newVal, slider.getExtent(), slider.getMinimum(),
-                        slider.getMaximum(), slider.getValueIsAdjusting());
+                int extent = windowSlideExtent > 0 ? windowSlideExtent : Math.max(1, slider.getExtent());
+                int maxStart = Math.max(slider.getMinimum(), slider.getMaximum() - extent);
+                int newVal = Math.max(slider.getMinimum(), Math.min(slider.getValue(), maxStart));
+                ((BitMapSlider)slider).getModel().setRangeProperties(newVal, extent, slider.getMinimum(),
+                        slider.getMaximum(), false);
                 windowSliding = false;
+                windowSlideExtent = -1;
             }
         }
 
@@ -292,6 +294,7 @@ class BitMapSliderUI extends RangeSliderUI {
         @Override
         public void mouseReleased(MouseEvent e) {
             updateValuesForSlidingWindow(e);
+            windowSlideExtent = -1;
 
             lowerDragging = false;
             upperDragging = false;
@@ -357,6 +360,7 @@ class BitMapSliderUI extends RangeSliderUI {
             if(isBetweenThumbs(x, y)) {
                 windowSliding = true;
                 previousY = y;
+                windowSlideExtent = Math.max(1, slider.getExtent());
                 slider.setValueIsAdjusting(true);
                 lowerDragging = true;
                 upperDragging = false;

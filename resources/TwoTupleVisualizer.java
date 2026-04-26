@@ -111,12 +111,14 @@ public class TwoTupleVisualizer extends Visualizer {
         final int[] bounds = new int[2];
         final byte[][] dataHolder = new byte[1][];
         Runnable captureState = () -> {
-            dataMicroSlider.setMinimum(dataMacroSlider.getValue());
-            dataMicroSlider.setMaximum(dataMacroSlider.getUpperValue());
             byte[] data = cantordust.getMainInterface().getData();
             dataHolder[0] = data;
-            int low = Math.max(0, Math.min(dataMicroSlider.getValue(), Math.max(0, data.length - 1)));
-            int high = Math.max(low + 1, Math.min(dataMicroSlider.getUpperValue(), data.length));
+            int macroLow = dataMacroSlider.getValue();
+            int macroHigh = dataMacroSlider.getUpperValue();
+            int sliderLow = Math.max(macroLow, dataMicroSlider.getValue());
+            int sliderHigh = Math.min(macroHigh, dataMicroSlider.getUpperValue());
+            int low = Math.max(0, Math.min(sliderLow, Math.max(0, data.length - 1)));
+            int high = Math.max(low + 1, Math.min(sliderHigh, data.length));
             bounds[0] = low;
             bounds[1] = high;
         };

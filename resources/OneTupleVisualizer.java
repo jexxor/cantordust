@@ -77,10 +77,17 @@ public class OneTupleVisualizer extends Visualizer {
 
     public void paintComponent(Graphics g) {
         super.paintComponent(g);
-        dataMicroSlider.setMinimum(dataMacroSlider.getValue());
-        dataMicroSlider.setMaximum(dataMacroSlider.getUpperValue());
-        int low = dataMicroSlider.getValue();
-        int high = dataMicroSlider.getUpperValue();
+        byte[] currentData = cantordust.getMainInterface().getData();
+        int dataLength = currentData != null ? currentData.length : 0;
+        if(dataLength <= 0) {
+            return;
+        }
+        int macroLow = dataMacroSlider.getValue();
+        int macroHigh = dataMacroSlider.getUpperValue();
+        int sliderLow = Math.max(macroLow, dataMicroSlider.getValue());
+        int sliderHigh = Math.min(macroHigh, dataMicroSlider.getUpperValue());
+        int low = Math.max(0, Math.min(sliderLow, dataLength - 1));
+        int high = Math.max(low + 1, Math.min(sliderHigh, dataLength));
         gradientPlot((Graphics2D)g, low, high);
     }
 

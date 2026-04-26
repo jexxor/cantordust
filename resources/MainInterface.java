@@ -58,6 +58,7 @@ public class MainInterface extends JPanel {
     public JLabel microValueLow = new JLabel();
     public JLabel widthValue = new JLabel();
     public JLabel offsetValue = new JLabel();
+    public JLabel coverageValue = new JLabel();
     public JLabel programName = new JLabel();
     public JLabel playbackTargetLabel = new JLabel();
     public JLabel playbackStepLabel = new JLabel();
@@ -99,6 +100,8 @@ public class MainInterface extends JPanel {
     private boolean suppressDataSliderCallback = false;
     private final byte[][] dataWindowBufferPool = new byte[DATA_WINDOW_BUFFER_POOL_SIZE][];
     private int dataWindowBufferCursor = 0;
+    private int microPreferredExtent = -1;
+    private boolean suppressMicroPreferredTracking = false;
 
     public MainInterface(byte[] mdata, GhidraSrc cd, JFrame frame) throws IOException {
         this.data = mdata;
@@ -150,6 +153,7 @@ public class MainInterface extends JPanel {
         microSlider = new BitMapSlider(0, this.data.length-1, this.data, this.cantordust);
         microSlider.setValue(macroSlider.getValue());
         microSlider.setUpperValue(macroSlider.getUpperValue());
+        microPreferredExtent = Math.max(1, microSlider.getExtent());
         gbc.gridx = xOffset + 10;
         add(microSlider, gbc);
 
@@ -374,6 +378,13 @@ public class MainInterface extends JPanel {
         gbc.gridwidth = 5;
         add(microValueHigh, gbc);
 
+        coverageValue.setHorizontalAlignment(SwingConstants.RIGHT);
+        coverageValue.setPreferredSize(new Dimension(230, 18));
+        gbc.gridx = xOffset + 402;
+        gbc.gridwidth = 130;
+        gbc.anchor = GridBagConstraints.EAST;
+        add(coverageValue, gbc);
+
 
         widthValue.setText(Integer.toHexString(widthSlider.getValue()).toUpperCase());
         widthValue.setHorizontalAlignment(SwingConstants.LEFT);
@@ -402,26 +413,7 @@ public class MainInterface extends JPanel {
                 macroValueHigh.setText(formatAddressForDisplay(maxAddress1));
                 macroValueLow.setText(formatAddressForDisplay(minAddress1));
 
-                int max = microSlider.getMaximum();
-                int min = microSlider.getMinimum();
-                int high = microSlider.getUpperValue();
-                int low = microSlider.getValue();
-                double highRatio = (double)(high-min)/(double)(max-min);
-                double lowRatio = (double)(low-min)/(double)(max-min);
-
-                // Update the upper and lower value of microSlider
-                microSlider.setMinimum(slider.getValue());
-                microSlider.setMaximum(slider.getUpperValue());
-                int nMax = microSlider.getMaximum();
-                int nMin = microSlider.getMinimum();
-                if(slider.getValue()-1 > microSlider.getValue()-1) {
-                    microSlider.setValue(slider.getValue());
-                }
-                if(slider.getUpperValue() < microSlider.getUpperValue()) {
-                    microSlider.setUpperValue(slider.getUpperValue());
-                }
-                microSlider.setUpperValue( (int)(highRatio * (nMax-nMin)) + nMin);
-                microSlider.setValue( (int)(lowRatio * (nMax-nMin)) + nMin);
+                remapMicroSliderToMacroWindow(slider, microSlider);
                 if(microSlider.ui != null) {
                     int bitmapLow = Math.max(0, slider.getValue() - 1);
                     int bitmapHigh = Math.min(data.length, slider.getUpperValue());
@@ -440,6 +432,7 @@ public class MainInterface extends JPanel {
                     microValueHigh.setText(formatAddressForDisplay(maxAddress1));
                     microValueLow.setText(formatAddressForDisplay(minAddress1));
                 }
+                refreshCoverageIndicator();
 
                 if(slider.getValueIsAdjusting()) {
                     repaint();
@@ -451,16 +444,6 @@ public class MainInterface extends JPanel {
                 BitMapSlider slider = (BitMapSlider) e.getSource();
                 long maxAddress1 = slider.getUpperValue();
                 long minAddress1 = slider.getValue();
-
-                // Make sure the slider stays within its bounds
-                if(macroSlider.getValue()-1 > slider.getValue()-1) {
-                    slider.setMinimum(macroSlider.getValue());
-                    slider.setValue(macroSlider.getValue());
-                }
-                if(macroSlider.getUpperValue() < slider.getUpperValue()) {
-                    slider.setMaximum(macroSlider.getUpperValue());
-                    slider.setUpperValue(macroSlider.getUpperValue());
-                }
 
                 // Update text for the slider
                 if(dataSlider != null){
@@ -474,6 +457,10 @@ public class MainInterface extends JPanel {
                     microValueHigh.setText(formatAddressForDisplay(maxAddress1));
                     microValueLow.setText(formatAddressForDisplay(minAddress1));
                 }
+                if(!suppressMicroPreferredTracking) {
+                    microPreferredExtent = Math.max(1, slider.getExtent());
+                }
+                refreshCoverageIndicator();
 
                 if(macroSlider.getValueIsAdjusting()) {
                     repaint();
@@ -505,6 +492,7 @@ public class MainInterface extends JPanel {
             }
         });
 
+        refreshCoverageIndicator();
         darkTheme();
     }
 
@@ -868,6 +856,7 @@ public class MainInterface extends JPanel {
         if(microSlider.ui != null) {
             microSlider.ui.makeBitmapAsync(macroSlider.getValue(), macroSlider.getUpperValue());
         }
+        refreshCoverageIndicator();
         requestMetricMapRefresh();
     }
 
@@ -885,6 +874,61 @@ public class MainInterface extends JPanel {
 
     private String formatAddressForDisplay(long fileOffset) {
         return cantordust.formatAddressForFileOffset(clampOffsetForDisplay(fileOffset));
+    }
+
+    private void remapMicroSliderToMacroWindow(BitMapSlider macro, BitMapSlider micro) {
+        int oldMin = micro.getMinimum();
+        int oldMax = micro.getMaximum();
+        int oldLow = micro.getValue();
+        int oldSpan = Math.max(1, micro.getExtent());
+        int oldRange = Math.max(1, oldMax - oldMin);
+
+        int newMin = macro.getValue();
+        int newMax = Math.max(newMin + 1, macro.getUpperValue());
+        int newRange = Math.max(1, newMax - newMin);
+
+        int desiredSpan = microPreferredExtent > 0 ? microPreferredExtent : oldSpan;
+        int newSpan = Math.max(1, Math.min(desiredSpan, newRange));
+
+        int oldEffectiveSpan = Math.max(1, Math.min(oldSpan, oldRange));
+        int oldSlideRange = Math.max(0, oldRange - oldEffectiveSpan);
+        int oldOffset = Math.max(0, Math.min(oldLow - oldMin, oldSlideRange));
+        int newSlideRange = Math.max(0, newRange - newSpan);
+
+        int newOffset;
+        if(oldSlideRange == 0 || newSlideRange == 0) {
+            newOffset = 0;
+        } else {
+            double offsetRatio = (double)oldOffset / (double)oldSlideRange;
+            newOffset = (int)Math.round(offsetRatio * newSlideRange);
+        }
+
+        int newLow = newMin + Math.max(0, Math.min(newOffset, newSlideRange));
+        suppressMicroPreferredTracking = true;
+        try {
+            micro.getModel().setRangeProperties(newLow, newSpan, newMin, newMax, micro.getValueIsAdjusting());
+        } finally {
+            suppressMicroPreferredTracking = false;
+        }
+    }
+
+    private int getCoveredAddressCount() {
+        if(microSlider == null) {
+            return 1;
+        }
+        int low = Math.max(0, microSlider.getValue());
+        int high = Math.max(low + 1, microSlider.getUpperValue());
+        int covered = Math.max(1, high - low);
+        int sourceLength = data != null ? data.length : 0;
+        if(sourceLength > 0) {
+            covered = Math.min(covered, sourceLength);
+        }
+        return Math.max(1, covered);
+    }
+
+    private void refreshCoverageIndicator() {
+        int covered = getCoveredAddressCount();
+        coverageValue.setText(String.format("Coverage: %,d addr", covered));
     }
 
     private GridBagConstraints buildVisualizerConstraints() {
@@ -940,6 +984,7 @@ public class MainInterface extends JPanel {
         this.microValueLow.setForeground(textColor);
         this.widthValue.setForeground(textColor);
         this.offsetValue.setForeground(textColor);
+        this.coverageValue.setForeground(textColor);
 
         this.widthDownButton.setBackground(c);
         this.widthDownButton.setForeground(textColor);
