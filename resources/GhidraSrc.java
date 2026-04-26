@@ -54,6 +54,23 @@ public class GhidraSrc extends GhidraScript{
         return "";
     }
 
+    public String getBookmarkPersistenceKey() {
+        if(currentProgram != null) {
+            String executablePath = currentProgram.getExecutablePath();
+            if(executablePath != null && !executablePath.isEmpty()) {
+                return executablePath;
+            }
+            String programName = currentProgram.getName();
+            if(programName != null && !programName.isEmpty()) {
+                return programName;
+            }
+        }
+        if(name != null && !name.isEmpty()) {
+            return name;
+        }
+        return "unknown-program";
+    }
+
     public MainInterface getMainInterface(){
         return this.mainInterface;
     }

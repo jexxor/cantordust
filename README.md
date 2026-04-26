@@ -65,6 +65,7 @@ The fork now includes all fixes and features tracked in [`CHANGELOG.md`](CHANGEL
 - Metric Map now supports drag selection (`Shift+left-drag` with threshold) and reports selected area size (`width x height`, cells, estimated bytes).
 - Metric Map now supports point bookmarks with right-click add/edit/remove/clear actions and visible bookmark labels.
 - Critical address mapping correctness fixes removed naive `minAddress + offset` display math; popup/slider addresses now resolve via Ghidra memory-block mapping and match actual navigation targets.
+- Made bookmarks more persistent by saving to disk and loading on startup.
 
 ## Installation and Setup
 

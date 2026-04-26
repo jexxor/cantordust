@@ -12,7 +12,15 @@ import java.awt.Color;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -27,6 +35,8 @@ public class MetricMap extends Visualizer{
     private static final long GUIDE_FOCUS_UPDATE_THROTTLE_MS = 16L;
     private static final int SELECTION_DRAG_THRESHOLD_PX = 6;
     private static final int BOOKMARK_HIT_RADIUS_PX = 12;
+    private static final String BOOKMARKS_VERSION_HEADER = "# cantordust-ng metric bookmarks v1";
+    private static final String BOOKMARKS_DIR_NAME = ".cantordust-ng/bookmarks";
     private static final byte[] EMPTY_BYTES = new byte[0];
     private byte[] reusableCurrentDataBuffer = new byte[0];
     protected int[][] pixelMap2D;
@@ -98,6 +108,7 @@ public class MetricMap extends Visualizer{
         this.csource = new ColorEntropy(this.cantordust, getCurrentData());
         this.map = new Hilbert(this.cantordust, 2, (int)(Math.log(getWindowSize())/Math.log(2)));
         this.renderLookupMap = this.map;
+        loadBookmarksFromDisk();
         draw();
     }
     
@@ -113,6 +124,7 @@ public class MetricMap extends Visualizer{
         this.csource = new ColorEntropy(this.cantordust, getCurrentData());
         this.map = new Hilbert(this.cantordust, 2, (int)(Math.log(getWindowSize())/Math.log(2)));
         this.renderLookupMap = this.map;
+        loadBookmarksFromDisk();
         draw();
     }
 
@@ -120,6 +132,7 @@ public class MetricMap extends Visualizer{
         LIVE_INSTANCES.add(this);
         addHierarchyListener(event -> {
             if((event.getChangeFlags() & HierarchyEvent.DISPLAYABILITY_CHANGED) != 0 && !isDisplayable()) {
+                persistBookmarksSafely();
                 LIVE_INSTANCES.remove(MetricMap.this);
             }
         });
@@ -419,6 +432,122 @@ public class MetricMap extends Visualizer{
         return (long)memLocBaseOffset + (long)relativeLocation;
     }
 
+    private Path getBookmarksStoragePath() {
+        String homeDirectory = System.getProperty("user.home");
+        if(homeDirectory == null || homeDirectory.trim().isEmpty()) {
+            return null;
+        }
+        String keySource = cantordust != null ? cantordust.getBookmarkPersistenceKey() : "unknown-program";
+        if(keySource == null || keySource.isEmpty()) {
+            keySource = "unknown-program";
+        }
+        String keyHash = sha256Hex(keySource);
+        return Paths.get(homeDirectory, BOOKMARKS_DIR_NAME, keyHash + ".bookmarks");
+    }
+
+    private String sha256Hex(String value) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(value.getBytes(StandardCharsets.UTF_8));
+            StringBuilder builder = new StringBuilder(hash.length * 2);
+            for(byte b : hash) {
+                int unsigned = b & 0xFF;
+                if(unsigned < 0x10) {
+                    builder.append('0');
+                }
+                builder.append(Integer.toHexString(unsigned));
+            }
+            return builder.toString();
+        } catch (NoSuchAlgorithmException e) {
+            return Integer.toHexString(value.hashCode());
+        }
+    }
+
+    private void loadBookmarksFromDisk() {
+        Path storagePath = getBookmarksStoragePath();
+        if(storagePath == null || !Files.exists(storagePath)) {
+            return;
+        }
+        List<String> lines;
+        try {
+            lines = Files.readAllLines(storagePath, StandardCharsets.UTF_8);
+        } catch (IOException ignored) {
+            return;
+        }
+
+        bookmarks.clear();
+        nextBookmarkId = 1;
+        for(String line : lines) {
+            if(line == null) {
+                continue;
+            }
+            String trimmed = line.trim();
+            if(trimmed.isEmpty() || trimmed.startsWith("#")) {
+                continue;
+            }
+            String[] parts = line.split("\t", 2);
+            if(parts.length != 2) {
+                continue;
+            }
+            long memoryOffset;
+            try {
+                memoryOffset = Long.parseLong(parts[0].trim());
+            } catch (NumberFormatException ignored) {
+                continue;
+            }
+            String label;
+            try {
+                label = new String(Base64.getDecoder().decode(parts[1].trim()), StandardCharsets.UTF_8);
+            } catch (IllegalArgumentException ignored) {
+                label = parts[1];
+            }
+            String normalizedLabel = label != null ? label.trim() : "";
+            if(normalizedLabel.isEmpty()) {
+                normalizedLabel = "Bookmark " + nextBookmarkId;
+            }
+            if(findBookmarkByOffset(memoryOffset) != null) {
+                continue;
+            }
+            bookmarks.add(new MetricBookmark(memoryOffset, normalizedLabel));
+            nextBookmarkId++;
+        }
+        nextBookmarkId = Math.max(nextBookmarkId, bookmarks.size() + 1);
+        refreshBookmarkMenuState();
+        repaint();
+    }
+
+    private void persistBookmarksSafely() {
+        try {
+            saveBookmarksToDisk();
+        } catch (RuntimeException ignored) {
+        }
+    }
+
+    private void saveBookmarksToDisk() {
+        Path storagePath = getBookmarksStoragePath();
+        if(storagePath == null) {
+            return;
+        }
+        try {
+            Path parent = storagePath.getParent();
+            if(parent != null) {
+                Files.createDirectories(parent);
+            }
+            List<String> lines = new ArrayList<>();
+            lines.add(BOOKMARKS_VERSION_HEADER);
+            for(MetricBookmark bookmark : bookmarks) {
+                if(bookmark == null) {
+                    continue;
+                }
+                String label = bookmark.label != null ? bookmark.label : "";
+                String encodedLabel = Base64.getEncoder().encodeToString(label.getBytes(StandardCharsets.UTF_8));
+                lines.add(Long.toString(bookmark.memoryOffset) + "\t" + encodedLabel);
+            }
+            Files.write(storagePath, lines, StandardCharsets.UTF_8);
+        } catch (IOException ignored) {
+        }
+    }
+
     private void refreshBookmarkMenuState() {
         if(addBookmarkMenuItem == null) {
             return;
@@ -450,6 +579,8 @@ public class MetricMap extends Visualizer{
             bookmarkMenuTarget = bookmark;
             nextBookmarkId++;
         }
+        refreshBookmarkMenuState();
+        persistBookmarksSafely();
         repaint();
     }
 
@@ -472,6 +603,8 @@ public class MetricMap extends Visualizer{
         }
         targetBookmark.label = label;
         bookmarkMenuTarget = targetBookmark;
+        refreshBookmarkMenuState();
+        persistBookmarksSafely();
         repaint();
     }
 
@@ -490,6 +623,8 @@ public class MetricMap extends Visualizer{
         }
         bookmarks.remove(targetBookmark);
         bookmarkMenuTarget = null;
+        refreshBookmarkMenuState();
+        persistBookmarksSafely();
         repaint();
     }
 
@@ -506,6 +641,8 @@ public class MetricMap extends Visualizer{
         if(choice == JOptionPane.YES_OPTION) {
             bookmarks.clear();
             bookmarkMenuTarget = null;
+            refreshBookmarkMenuState();
+            persistBookmarksSafely();
             repaint();
         }
     }
