@@ -338,25 +338,24 @@ public class MainInterface extends JPanel {
         gbc.gridy = 5;
         add(themeButton, gbc);
 
-        long minGhidraAddress = Long.parseLong(cantordust.getCurrentProgram().getMinAddress().toString(false), 16);
-        long maxAddress = minGhidraAddress + macroSlider.getUpperValue(); 
-        long minAddress = minGhidraAddress + macroSlider.getValue() - 1;
+        long maxAddress = macroSlider.getUpperValue(); 
+        long minAddress = macroSlider.getValue() - 1L;
         
-        macroValueHigh.setText(Long.toHexString(maxAddress).toUpperCase());
+        macroValueHigh.setText(formatAddressForDisplay(maxAddress));
         macroValueHigh.setHorizontalAlignment(SwingConstants.LEFT);
 
-        macroValueLow.setText(Long.toHexString(minAddress).toUpperCase());
+        macroValueLow.setText(formatAddressForDisplay(minAddress));
         macroValueLow.setHorizontalAlignment(SwingConstants.LEFT);
 
-        maxAddress = minGhidraAddress + microSlider.getUpperValue();
-        minAddress = minGhidraAddress + microSlider.getValue() - 1;
+        maxAddress = microSlider.getUpperValue();
+        minAddress = microSlider.getValue() - 1L;
         
         programName.setText(cantordust.name);
         gbc.gridx = xOffset + 0;
         gbc.gridy = 513;
         //add(programName, gbc);
 
-        microValueLow.setText(Long.toHexString(minAddress).toUpperCase());
+        microValueLow.setText(formatAddressForDisplay(minAddress));
         microValueLow.setHorizontalAlignment(SwingConstants.LEFT);
         gbc.gridx = xOffset + 5;
         gbc.gridwidth = 5;
@@ -369,7 +368,7 @@ public class MainInterface extends JPanel {
         gbc.gridwidth = 1;
         add(dataRange, gbc);
 
-        microValueHigh.setText(Long.toHexString(maxAddress).toUpperCase());
+        microValueHigh.setText(formatAddressForDisplay(maxAddress));
         microValueHigh.setHorizontalAlignment(SwingConstants.LEFT);
         gbc.gridx = xOffset + 11;
         gbc.gridwidth = 5;
@@ -396,13 +395,12 @@ public class MainInterface extends JPanel {
         macroSlider.addChangeListener(new ChangeListener() {
             public void stateChanged(ChangeEvent e) {
                 BitMapSlider slider = (BitMapSlider) e.getSource();
-                long minGhidraAddress1 = Long.parseLong(cantordust.getCurrentProgram().getMinAddress().toString(false), 16);
-                long maxAddress1 = minGhidraAddress1 + slider.getUpperValue();
-                long minAddress1 = minGhidraAddress1 + slider.getValue() - 1;
+                long maxAddress1 = slider.getUpperValue();
+                long minAddress1 = slider.getValue() - 1L;
 
                 // Update text for upper and lower value
-                macroValueHigh.setText(Long.toHexString(maxAddress1).toUpperCase());
-                macroValueLow.setText(Long.toHexString(minAddress1).toUpperCase());
+                macroValueHigh.setText(formatAddressForDisplay(maxAddress1));
+                macroValueLow.setText(formatAddressForDisplay(minAddress1));
 
                 int max = microSlider.getMaximum();
                 int min = microSlider.getMinimum();
@@ -432,15 +430,15 @@ public class MainInterface extends JPanel {
 
                 // Update text for upper and lower value of microSlider
                 if(dataSlider != null){
-                    maxAddress1 = minGhidraAddress1 + dataSlider.getValue() + microSlider.getUpperValue();
-                    minAddress1 = minGhidraAddress1 + dataSlider.getValue() + microSlider.getValue() - 1;
-                    microValueHigh.setText(Long.toHexString(maxAddress1).toUpperCase());
-                    microValueLow.setText(Long.toHexString(minAddress1).toUpperCase());
+                    maxAddress1 = dataSlider.getValue() + microSlider.getUpperValue();
+                    minAddress1 = dataSlider.getValue() + microSlider.getValue() - 1L;
+                    microValueHigh.setText(formatAddressForDisplay(maxAddress1));
+                    microValueLow.setText(formatAddressForDisplay(minAddress1));
                 } else {
-                    maxAddress1 = minGhidraAddress1 + microSlider.getUpperValue();
-                    minAddress1 = minGhidraAddress1 + microSlider.getValue() - 1 + slider.getValue();
-                    microValueHigh.setText(Long.toHexString(maxAddress1).toUpperCase());
-                    microValueLow.setText(Long.toHexString(minAddress1).toUpperCase());
+                    maxAddress1 = microSlider.getUpperValue();
+                    minAddress1 = microSlider.getValue() - 1L + slider.getValue();
+                    microValueHigh.setText(formatAddressForDisplay(maxAddress1));
+                    microValueLow.setText(formatAddressForDisplay(minAddress1));
                 }
 
                 if(slider.getValueIsAdjusting()) {
@@ -451,9 +449,8 @@ public class MainInterface extends JPanel {
         microSlider.addChangeListener(new ChangeListener() {
             public void stateChanged(ChangeEvent e) {
                 BitMapSlider slider = (BitMapSlider) e.getSource();
-                long minGhidraAddress1 = Long.parseLong(cantordust.getCurrentProgram().getMinAddress().toString(false), 16);
-                long maxAddress1 = minGhidraAddress1 + slider.getUpperValue();
-                long minAddress1 = minGhidraAddress1 + slider.getValue();
+                long maxAddress1 = slider.getUpperValue();
+                long minAddress1 = slider.getValue();
 
                 // Make sure the slider stays within its bounds
                 if(macroSlider.getValue()-1 > slider.getValue()-1) {
@@ -471,11 +468,11 @@ public class MainInterface extends JPanel {
                     // cantordust.cdprint("min"+slider.getMinimum()+"\n");
                     maxAddress1 = maxAddress1 + dataSlider.getValue();
                     minAddress1 = minAddress1 + dataSlider.getValue();
-                    microValueHigh.setText(Long.toHexString(maxAddress1).toUpperCase());
-                    microValueLow.setText(Long.toHexString(minAddress1).toUpperCase());
+                    microValueHigh.setText(formatAddressForDisplay(maxAddress1));
+                    microValueLow.setText(formatAddressForDisplay(minAddress1));
                 } else {
-                    microValueHigh.setText(Long.toHexString(maxAddress1).toUpperCase());
-                    microValueLow.setText(Long.toHexString(minAddress1).toUpperCase());
+                    microValueHigh.setText(formatAddressForDisplay(maxAddress1));
+                    microValueLow.setText(formatAddressForDisplay(minAddress1));
                 }
 
                 if(macroSlider.getValueIsAdjusting()) {
@@ -858,11 +855,10 @@ public class MainInterface extends JPanel {
     private void applyDataWindow(int start, byte[] nextDataWindow) {
         data = nextDataWindow;
 
-        long minGhidraAddress = Long.parseLong(cantordust.getCurrentProgram().getMinAddress().toString(false), 16);
-        long maxAddress = minGhidraAddress + start + microSlider.getUpperValue();
-        long minAddress = minGhidraAddress + start + macroSlider.getValue() + microSlider.getValue() - 1;
-        microValueHigh.setText(Long.toHexString(maxAddress).toUpperCase());
-        microValueLow.setText(Long.toHexString(minAddress).toUpperCase());
+        long maxAddress = start + microSlider.getUpperValue();
+        long minAddress = start + macroSlider.getValue() + microSlider.getValue() - 1L;
+        microValueHigh.setText(formatAddressForDisplay(maxAddress));
+        microValueLow.setText(formatAddressForDisplay(minAddress));
 
         macroSlider.updateData(data);
         microSlider.updateData(data);
@@ -877,6 +873,18 @@ public class MainInterface extends JPanel {
 
     private void requestMetricMapRefresh() {
         MetricMap.requestRenderAll();
+    }
+
+    private long clampOffsetForDisplay(long fileOffset) {
+        if(fullData == null || fullData.length <= 0) {
+            return Math.max(0L, fileOffset);
+        }
+        long maxOffset = fullData.length - 1L;
+        return Math.max(0L, Math.min(maxOffset, fileOffset));
+    }
+
+    private String formatAddressForDisplay(long fileOffset) {
+        return cantordust.formatAddressForFileOffset(clampOffsetForDisplay(fileOffset));
     }
 
     private GridBagConstraints buildVisualizerConstraints() {

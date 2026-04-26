@@ -62,8 +62,9 @@ The fork now includes all fixes and features tracked in [`CHANGELOG.md`](CHANGEL
 - Color sources now expose a direct ARGB fast path; Metric Map consumes it to avoid per-pixel `Rgb` allocation.
 - Entropy shading was rewritten with reusable histogram buffers (no per-pixel histogram allocations).
 - Runtime `Interpolation` toggle was added in Metric Map and Linear Bitmap popup menus.
-- Metric Map now supports drag selection (`Shift+left-drag` with threshold) and reports selected area size (`width x height`, cells, estimated bytes) via popup.
-- Metric Map now supports named bookmarks with right-click add/edit/remove/clear actions, and draws bookmark markers directly on the map.
+- Metric Map now supports drag selection (`Shift+left-drag` with threshold) and reports selected area size (`width x height`, cells, estimated bytes).
+- Metric Map now supports point bookmarks with right-click add/edit/remove/clear actions and visible bookmark labels.
+- Critical address mapping correctness fixes removed naive `minAddress + offset` display math; popup/slider addresses now resolve via Ghidra memory-block mapping and match actual navigation targets.
 
 ## Installation and Setup
 

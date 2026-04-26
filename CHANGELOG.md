@@ -45,3 +45,6 @@
 - Added runtime `Interpolation` toggle in Metric Map and Linear Bitmap popup menus for quick scaling-mode switching.
 - Added drag selection in Metric Map (`Shift+left-drag` with movement threshold), showing selected area size (`width x height` cells and estimated bytes) in a popup on release.
 - Added Metric Map bookmark support with right-click add/edit/remove/clear actions and visible bookmark markers/labels rendered on top of the map.
+- Removed experimental rectangular region bookmarks for now to prioritize stability; point bookmarks and area-size selection remain supported.
+- Removed naive linear `minAddress + offset` address display math and switched popup/slider address text to memory-block-aware Ghidra mapping.
+- Fixed file-offset-to-address conversion boundary handling (`offset == 0`) and hardened `gotoFileAddress` null safety.

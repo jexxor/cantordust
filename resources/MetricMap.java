@@ -294,8 +294,7 @@ public class MetricMap extends Visualizer{
                     updateGuideFocus(lookupMap, loc, e.getID() == MouseEvent.MOUSE_PRESSED);
                     int relativeLocation = mapIndexToRelativeLocation(loc);
                     int memoryLocation = memLocBaseOffset + relativeLocation;
-                    long minGhidraAddress = Long.parseLong(cantordust.getCurrentProgram().getMinAddress().toString(false), 16);
-                    String currentAddress = Long.toHexString(minGhidraAddress+(long)memoryLocation).toUpperCase();
+                    String currentAddress = cantordust.formatAddressForFileOffset(memoryLocation);
                     JLabel l;
                     if(isClassifier) {
                         ClassifierModel classifier = cantordust.getClassifier();

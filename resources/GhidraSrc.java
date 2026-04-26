@@ -141,6 +141,9 @@ public class GhidraSrc extends GhidraScript{
      * Converts a file offset to a Ghidra address
      */
     public Address getGhidraAddress(long fileOffset) {
+        if(currentProgram == null || fileOffset < 0) {
+            return null;
+        }
         // Get all the memory blocks of the program
         MemoryBlock[] memBlks = currentProgram.getMemory().getBlocks();
 
@@ -157,13 +160,17 @@ public class GhidraSrc extends GhidraScript{
 
                 // Check if fileOffset is in this block
                 long offset = fileOffset - fileBytesOffset;
-                if((offset > 0) && (offset < length)) {
+                if(offset >= 0 && offset < length) {
                     // If it is, get an address for that fileOffset based on the block's start address
                     Address start = blk.getStart();
-
-                    // Get a new address in start's address space using its offset and offet
-                    Address addr = start.getNewAddress(offset + start.getOffset());
-                    return addr;
+                    try {
+                        return start.add(offset);
+                    } catch (RuntimeException ignored) {
+                        try {
+                            return start.getNewAddress(offset + start.getOffset());
+                        } catch (RuntimeException ignoredAgain) {
+                        }
+                    }
                 }
             }
         }
@@ -171,23 +178,32 @@ public class GhidraSrc extends GhidraScript{
         return null;
     }
 
+    public String formatAddressForFileOffset(long fileOffset) {
+        Address mappedAddress = getGhidraAddress(fileOffset);
+        if(mappedAddress != null) {
+            return mappedAddress.toString(false).toUpperCase();
+        }
+        if(fileOffset >= 0) {
+            return ("FILE+0x" + Long.toHexString(fileOffset)).toUpperCase();
+        }
+        return "UNKNOWN";
+    }
+
     /**
      * Sets the current address in Ghidra to a specific file offset
      */
     public boolean gotoFileAddress(long addr) {
         Address ghidraAddr = getGhidraAddress(addr);
-
+        if(ghidraAddr == null) {
+            return false;
+        }
         // Make an AddressSet based on ghidraAddr
         AddressSet set = new AddressSet(ghidraAddr);
-
-        if(ghidraAddr != null) {
-            // Set the current location and highlight to the current address to change
-            // the current selected address in Ghidra
-            setCurrentLocation(ghidraAddr);
-            setCurrentHighlight(set);
-            return true;
-        }
-		return false;
+        // Set the current location and highlight to the current address to change
+        // the current selected address in Ghidra
+        setCurrentLocation(ghidraAddr);
+        setCurrentHighlight(set);
+        return true;
     }
 
     public void initiateClassifier() {
