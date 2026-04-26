@@ -20,51 +20,12 @@ https://github.com/user-attachments/assets/fbbbfabf-f5d7-401f-bb4a-37f75cddd9f4
 
 The fork now includes all fixes and features tracked in [`CHANGELOG.md`](CHANGELOG.md). Highlights:
 
-- Main window is explicitly resizable/fullscreen-friendly, and the main visualization area scales correctly with window size.
-- Metric Map scales with window resize (including click-to-address mapping), and Two Tuple shows coordinate popups as `(0xXX, 0xYY)`.
-- Fast-scroll stability was hardened (slider bitmap rendering, Two Tuple cache bounds, serialized Metric Map redraws) to prevent exceptions and concurrent map corruption.
-- Playback controls were added: `Play`, `Pause`, `Stop`, `Loop`, `Step`, `ms`, with selectable targets (`Absolute`, `Macro`, `Micro`).
-- Data-window updates use a latest-wins queue, and bitmap/two-tuple/metric-map renderers coalesce background work to avoid unbounded render thread buildup.
-- Playback responsiveness was tuned with hidden-view redraw suppression, render coalescing, and optimized update pipelines.
-- Metric Map popup address/classifier lookup now aligns with currently zoomed rendered state (including classifier mode), not stale coordinates.
-- Classifier rendering was hardened to tolerate null/uninitialized classifier state.
-- Linear Bitmap width/offset sliders update live during drag (not only on release).
-- Metric Map first-open render reliability was fixed.
-- Sequence guide path was added to Metric Map, with enable/disable and trail length controls.
-- ARGB1555 decoding in Metric Map was fixed (correct 5-bit scaling and bounds behavior).
-- 24bpp/32bpp decoding now uses unsigned channels and safe clamping.
-- 64bpp decoding was reworked for proper 16-bit downconversion and alpha-aware behavior.
-- Classifier wavelength conversion bug (green mask extraction) was fixed.
-- `ColorGradient` and `ColorClass` now use unsigned byte semantics (`0..255`), not signed Java byte behavior.
-- Entropy shading was hardened for short windows and removed expensive per-pixel debug logging.
-- Fragile string identity checks (`==`) were replaced with value checks (`equals`) for mode/type detection.
-- Per-frame `ColorSpectrum` recreation was removed; spectrum mapping is stable and no longer remapped each frame during scrubbing.
-- Noisy symbol-map debug logging was removed to avoid console I/O bottlenecks.
-- Remaining index safety gaps were fixed in `Color8bpp` and `ColorSpectrum`.
-- Classifier tail/partial block coverage was fixed; `classAtIndex` now uses explicit bounds clamping.
-- Entropy window math near EOF was fixed; probability normalization now uses actual sampled byte count.
-- Metric Map redraw coalescing now reuses one render executor instead of creating new threads per burst.
-- Metric Map square rendering now writes directly to 1D raster buffers and reuses sampled colors when possible.
-- Entropy internals now use fixed-size histograms instead of hash-map iteration in hot paths.
-- 8bpp/24bpp/32bpp color paths removed unnecessary `java.awt.Color` allocations.
-- Bitmap/TwoTuple/Slider/Data-window workers now use reusable single-thread executors to cut thread creation overhead.
-- Two Tuple now writes ARGB directly to image buffers (instead of per-pixel `Graphics2D` fill calls).
-- Spectrum and classifier coloring now use precomputed LUTs.
-- Bitmap entropy mode reuses a persistent entropy source object.
-- Two Tuple cache blocks moved from object-heavy tuple maps to dense `int[65536]` tables with touched-index reuse.
-- Bitmap rendering keeps full-resolution frame buffers and scales at paint time (removed expensive per-frame `getScaledInstance(...)`).
-- Metric Map drag responsiveness improved with more frequent stale-frame cancellation checks while preserving full-resolution rendering.
-- Initial window sizing now uses packed content dimensions and safer minimums, preventing first-launch clipping of left/right controls.
-- Metric Map playback now avoids rebuilding per-frame index hash maps and derives source offsets directly from map index math.
-- Metric Map now renders through packed ARGB/DataBuffer pipelines with reduced conversion overhead.
-- Playback path keeps full-resolution map rendering and skips guide-overlay regeneration during active playback for smoother animation.
-- Metric Map now caches full-resolution curve points (`index -> x,y`) and source-offset mappings to reduce repeated per-frame curve math/object churn.
-- Color sources now expose a direct ARGB fast path; Metric Map consumes it to avoid per-pixel `Rgb` allocation.
-- Entropy shading was rewritten with reusable histogram buffers (no per-pixel histogram allocations).
-- Runtime `Interpolation` toggle was added in Metric Map and Linear Bitmap popup menus.
-- Metric Map now supports drag selection (`Shift+left-drag` with threshold) and reports selected area size (`width x height`, cells, estimated bytes).
-- Metric Map now supports point bookmarks with right-click add/edit/remove/clear actions and visible bookmark labels.
-- Critical address mapping correctness fixes removed naive `minAddress + offset` display math; popup/slider addresses now resolve via Ghidra memory-block mapping and match actual navigation targets.
+* **Render pipeline redesigned**: coalescing (*latest-wins*) model with reusable executors → no stale frames, stable playback, no thread explosion under load.
+* **High-performance rendering path**: direct ARGB buffers, LUT-based coloring, no per-frame object allocations → drastically reduced render overhead.
+* **Metric Map reworked**: cached index→coordinate/offset mappings + packed raster pipeline → smooth animation and correct address resolution.
+* **Memory & hot-path optimizations**: removed object-heavy structures (dense tables, reusable histograms) → predictable performance and lower GC pressure.
+* **Correctness fixes**: fixed color decoding (ARGB1555/24/32/64bpp), entropy math, and address mapping → consistent analysis results.
+
 
 ## Installation and Setup
 
