@@ -42,6 +42,7 @@ public class BitMapVisualizer extends Visualizer {
     private boolean renderWorkerRunning = false;
     private int pendingRenderGeneration = 0;
     private final ColorEntropy entropySource;
+    private boolean flipVertically = false;
 
     private volatile BufferedImage img;
 
@@ -182,6 +183,16 @@ public class BitMapVisualizer extends Visualizer {
         });
         popup.add(interpolationToggle);
 
+        JCheckBoxMenuItem flipVerticalToggle = new JCheckBoxMenuItem("Flip Vertically", false);
+        flipVerticalToggle.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                flipVertically = flipVerticalToggle.isSelected();
+                repaint();
+            }
+        });
+        popup.add(flipVerticalToggle);
+
         this.addMouseListener(new MouseAdapter() {  
             public void mouseReleased(MouseEvent e) {  
                 if(e.getButton() == 3){
@@ -200,7 +211,13 @@ public class BitMapVisualizer extends Visualizer {
         if(img != null) {
             Graphics2D g2 = (Graphics2D) g.create();
             RenderSettings.applyImageRenderingHints(g2);
-            g2.drawImage(img, 0, 0, Math.max(1, getWidth()), Math.max(1, getHeight()), this);
+            int targetWidth = Math.max(1, getWidth());
+            int targetHeight = Math.max(1, getHeight());
+            if(flipVertically) {
+                g2.drawImage(img, 0, targetHeight, targetWidth, -targetHeight, this);
+            } else {
+                g2.drawImage(img, 0, 0, targetWidth, targetHeight, this);
+            }
             g2.dispose();
         }
     }
