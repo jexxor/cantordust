@@ -163,6 +163,15 @@ public class BitMapVisualizer extends Visualizer {
         });
         popup.add(entropy);
 
+        JMenuItem bpp_64 = new JMenuItem("64bpp RGBA64");
+        bpp_64.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent e) {
+                mode = 5;
+                constructImageAsync();
+            }
+        });
+        popup.add(bpp_64);
+
         JCheckBoxMenuItem interpolationToggle = new JCheckBoxMenuItem("Interpolation", RenderSettings.isInterpolationEnabled());
         interpolationToggle.addActionListener(new ActionListener() {
             @Override
@@ -349,6 +358,30 @@ public class BitMapVisualizer extends Visualizer {
                 }
                 break;
 
+            //64bpp RGBA (16-bit channels, little-endian BGRA order in stream)
+            case 5:
+                bimg = new BufferedImage(width, Math.max(1, (high - low) / xMax / 8 + 1), BufferedImage.TYPE_INT_ARGB);
+                pixelBuffer = ((DataBufferInt)bimg.getRaster().getDataBuffer()).getData();
+                pixelPos = 0;
+                maxPixels = pixelBuffer.length;
+                for(i = low; i < high - 8; i += 8) {
+                    if(pixelPos >= maxPixels) {
+                        break;
+                    }
+                    int blue16 = readUint16LEAtOffset(data, i, offset);
+                    int green16 = readUint16LEAtOffset(data, i + 2, offset);
+                    int red16 = readUint16LEAtOffset(data, i + 4, offset);
+                    int alpha16 = readUint16LEAtOffset(data, i + 6, offset);
+
+                    int red8 = (red16 * 255 + 32767) / 65535;
+                    int green8 = (green16 * 255 + 32767) / 65535;
+                    int blue8 = (blue16 * 255 + 32767) / 65535;
+                    int alpha8 = (alpha16 * 255 + 32767) / 65535;
+
+                    pixelBuffer[pixelPos++] = (alpha8 << 24) | (red8 << 16) | (green8 << 8) | blue8;
+                }
+                break;
+
             // 8bpp
             default:
                 bimg = new BufferedImage(width, Math.max(1, (high - low) / xMax + 1), BufferedImage.TYPE_INT_ARGB);
@@ -376,6 +409,12 @@ public class BitMapVisualizer extends Visualizer {
             return 0;
         }
         return data[sourceIndex] & 0xFF;
+    }
+
+    private int readUint16LEAtOffset(byte[] data, int index, int offset) {
+        int lo = byteAtOffset(data, index, offset);
+        int hi = byteAtOffset(data, index + 1, offset);
+        return lo | (hi << 8);
     }
     
     public static int getWindowSize() {
