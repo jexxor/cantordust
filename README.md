@@ -14,17 +14,16 @@ Background and history: [Battelle blog post](https://inside.battelle.org/blog-de
 
 ## Preview
 
-https://github.com/user-attachments/assets/fbbbfabf-f5d7-401f-bb4a-37f75cddd9f4
+https://github.com/user-attachments/assets/19d1f0c2-99b0-4ed6-992f-09116acd209c
 
 ## What's New in cantordust-ng
 
 The fork now includes all fixes and features tracked in [`CHANGELOG.md`](CHANGELOG.md). Highlights:
 
-* **Render pipeline redesigned**: coalescing (*latest-wins*) model with reusable executors → no stale frames, stable playback, no thread explosion under load.
-* **High-performance rendering path**: direct ARGB buffers, LUT-based coloring, no per-frame object allocations → drastically reduced render overhead.
-* **Metric Map reworked**: cached index→coordinate/offset mappings + packed raster pipeline → smooth animation and correct address resolution.
-* **Memory & hot-path optimizations**: removed object-heavy structures (dense tables, reusable histograms) → predictable performance and lower GC pressure.
-* **Correctness fixes**: fixed color decoding (ARGB1555/24/32/64bpp), entropy math, and address mapping → consistent analysis results.
+1. Data slider playback
+1. Fixed ARGB1555 correctness
+1. Persistent bookmarks
+1. Hot path optimizations
 
 ## Installation and Setup
 
