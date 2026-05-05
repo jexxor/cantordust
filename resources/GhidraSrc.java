@@ -56,14 +56,36 @@ public class GhidraSrc extends GhidraScript{
 
     public String getBookmarkPersistenceKey() {
         if(currentProgram != null) {
+            // NOTE: Bookmarks must not collide across different binaries that happen to share the
+            // same filename (e.g. replacing main.exe with a different main.exe). Prefer a stable
+            // fingerprint from Ghidra's import metadata.
+            String hash = null;
+            try {
+                hash = currentProgram.getExecutableSHA256();
+            } catch (Throwable ignored) {
+            }
+            if(hash == null || hash.isEmpty()) {
+                try {
+                    hash = currentProgram.getExecutableMD5();
+                } catch (Throwable ignored) {
+                }
+            }
+
+            String programName = currentProgram.getName();
+            if(programName == null || programName.isEmpty()) {
+                programName = "unknown-program";
+            }
+
+            if(hash != null && !hash.isEmpty()) {
+                return programName + ":" + hash;
+            }
+
             String executablePath = currentProgram.getExecutablePath();
             if(executablePath != null && !executablePath.isEmpty()) {
-                return executablePath;
+                return programName + ":" + executablePath;
             }
-            String programName = currentProgram.getName();
-            if(programName != null && !programName.isEmpty()) {
-                return programName;
-            }
+
+            return programName;
         }
         if(name != null && !name.isEmpty()) {
             return name;
